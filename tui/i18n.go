@@ -667,6 +667,11 @@ var translations = map[string]map[Lang]string{
 		LangEN: "✓ Config saved to ",
 	},
 
+	"session.orphan_cleaned": {
+		LangZH: "🧹 已清理 %d 个失效会话(workspace 目录已不存在,历史一并删除):",
+		LangEN: "🧹 Cleaned up %d stale session(s) (workspace no longer exists; history removed):",
+	},
+
 	// === Review modal ===
 	"review.title": {
 		LangZH: "Review Required",

@@ -28,6 +28,8 @@ const I18N = {
     'ask.skipped': '（已跳过）',
     'ask.none': '（未选）',
     'ask.join': '、',
+    'ask.other': '其他',
+    'ask.other_ph': '其他（直接输入你的答案）',
     'footer.thinking': '思考中',
     'footer.streaming': '输出中',
     'footer.tool': '调用工具',
@@ -117,6 +119,8 @@ const I18N = {
     'ask.skipped': '(skipped)',
     'ask.none': '(none)',
     'ask.join': ', ',
+    'ask.other': 'Other',
+    'ask.other_ph': 'Other (type your own answer)',
     'footer.thinking': 'Thinking',
     'footer.streaming': 'Responding',
     'footer.tool': 'Running tool',
@@ -206,6 +210,7 @@ createApp({
       reviewPending: null,
       askPending: null, // ask_request 的 questions 数组,null = 无
       askSel: [],       // [题][选项] 勾选态
+      askCustom: [],    // [题] 「其他」的自由文本(issue #242)。非空即视为选中,不另设勾选位
       queued: [],       // 流式/压缩中排队待发送的消息原文(FIFO),展示在输入框上方(issue #161)
       // 活动状态行(对齐 TUI 输入框上方那条):状态 / 实时耗时 / 工具调用
       status: 'idle',   // idle | thinking | streaming | tool | error
@@ -490,8 +495,15 @@ createApp({
       if (multiple) {
         this.askSel[qi][oi] = !this.askSel[qi][oi];
       } else {
-        // 单选:同题互斥
+        // 单选:同题互斥 —— 连「其他」的文本一起清掉,自由作答同样算"一个答案"
         this.askSel[qi] = this.askSel[qi].map((_, i) => i === oi);
+        this.askCustom[qi] = '';
+      }
+    },
+    // onAskCustom 在「其他」输入框变化时调:单选题里写了字就等于放弃预设项,顺手清掉勾选。
+    onAskCustom(qi, multiple) {
+      if (!multiple && (this.askCustom[qi] || '').trim() && this.askSel[qi]) {
+        this.askSel[qi] = this.askSel[qi].map(() => false);
       }
     },
     // pushAskRecord 把作答折叠成一条 ask-record 消息留在对话流(对齐 TUI 的 kindSystem 档案段,issue #134):
@@ -503,6 +515,8 @@ createApp({
         const sel = (q.options || [])
           .filter((_, oi) => this.askSel[qi] && this.askSel[qi][oi])
           .map(opt => opt.label);
+        const custom = (this.askCustom[qi] || '').trim();
+        if (custom) sel.push(custom);
         const ans = sel.length ? sel.join(this.t('ask.join')) : this.t('ask.none');
         return `❓ ${q.question} → **${ans}**`;
       });
@@ -511,16 +525,20 @@ createApp({
     async submitAsk() {
       // 组装成与终端一致的格式:{"answers":[{question, selected:[value...]}]}
       const questions = this.askPending || [];
-      const answers = questions.map((q, qi) => ({
-        question: q.question,
-        selected: (q.options || [])
+      const answers = questions.map((q, qi) => {
+        const selected = (q.options || [])
           .filter((_, oi) => this.askSel[qi] && this.askSel[qi][oi])
-          .map(opt => opt.value || opt.label),
-      }));
+          .map(opt => opt.value || opt.label);
+        // 「其他」的自由文本作为一个普通答案值混进 selected(对齐终端 buildAskAnswer)。
+        const custom = (this.askCustom[qi] || '').trim();
+        if (custom) selected.push(custom);
+        return { question: q.question, selected };
+      });
       const answer = JSON.stringify({ answers });
       this.pushAskRecord(questions, false); // 留痕:先于清空 askSel
       this.askPending = null;
       this.askSel = [];
+      this.askCustom = [];
       await fetch('/api/ask-answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -531,6 +549,7 @@ createApp({
       this.pushAskRecord(this.askPending, true); // 取消也留痕:先于清空 askSel
       this.askPending = null;
       this.askSel = [];
+      this.askCustom = [];
       await fetch('/api/ask-answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -679,6 +698,7 @@ createApp({
       this.reviewPending = s.reviewPending || null;
       this.askPending = (s.askQuestions && s.askQuestions.length) ? s.askQuestions : null;
       this.askSel = (this.askPending || []).map(q => (q.options || []).map(() => false));
+      this.askCustom = (this.askPending || []).map(() => '');
       if (s.lang) this.lang = s.lang;
       if (s.vendor) this.vendor = s.vendor;
       if (s.routing) this.routing = s.routing;
@@ -807,10 +827,12 @@ createApp({
         case 'ask_request':
           this.askPending = ev.questions || null;
           this.askSel = (ev.questions || []).map(q => (q.options || []).map(() => false));
+          this.askCustom = (ev.questions || []).map(() => '');
           break;
         case 'ask_resolved':
           this.askPending = null;
           this.askSel = [];
+          this.askCustom = [];
           break;
         case 'queued':
           // 流式/压缩中排队待发送列表整份覆盖(空 = 队列已清空),展示在输入框上方(issue #161)

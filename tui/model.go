@@ -364,8 +364,13 @@ type model struct {
 	askQuestions []agent.AskQuestion
 	askSelected  [][]bool
 	askQIdx      int  // 当前题
-	askOptIdx    int  // 当前题内的选项光标
+	askOptIdx    int  // 当前题内的选项光标;== len(Options) 时停在末尾的「其他」输入行
 	askWarn      bool // 当前题没选就按了回车 → 显示红色闪烁提示,提醒用空格选
+	// askCustom[题] 是该题「其他」行的自由文本(issue #242):预设选项覆盖不到时用户可以自己写。
+	// **非空即视为选中**,不另设勾选位 —— 「其他」行上空格要能打出空格,腾不出切换键;
+	// 清空文本就是取消选择,不必再教一套额外操作。
+	askCustom []string
+	askInput  textinput.Model // 「其他」行的输入框,绑定当前题;切题时与 askCustom 互存互取
 
 	// /lang 选择 modal 状态。showLangModal=true 时全屏路由按键到 modal,
 	// langModalIdx ∈ {0:zh, 1:en}。
@@ -657,8 +662,13 @@ func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub
 	// 当前 workspace 的会话持久化。建/打开 ~/.deepx/sessions/{sha1(wd)[:16]}/。
 	// 失败(权限/磁盘满)不致命 —— sess=nil 时 appendChat 跳过持久化,Memory 工具返回禁用提示。
 	sess, sessErr := session.New(wd)
+	var orphaned []session.OrphanRemoval
 	if sessErr == nil {
 		tools.SetMemorySession(sess)
+		// 每次启动清一次孤儿会话:workspace 目录已经不在了的,整个 session 目录删掉。
+		// 判据很保守(见 session.CleanupOrphaned),放在 session.New 之后跑 —— 当前会话
+		// 的 id 传进去做白名单,自己永远不会被自己删掉。
+		orphaned = session.CleanupOrphaned(sess.SessionID())
 	}
 
 	// Skill 加载器:多来源发现(兼容 Claude Code / opencode / cursor / agents 生态)。
@@ -890,6 +900,16 @@ func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub
 
 	// 每次启动的欢迎语。
 	m.appendChat("System", T("welcome"))
+
+	// 清理掉的孤儿会话如实报一行(只在真删了东西时吭声)。把删掉的 workspace 路径列出来 ——
+	// 删的是不可逆的历史,用户至少要能看见删的是哪些。
+	if len(orphaned) > 0 {
+		paths := make([]string, 0, len(orphaned))
+		for _, o := range orphaned {
+			paths = append(paths, "  · "+o.Workspace)
+		}
+		m.appendChat("System", fmt.Sprintf(T("session.orphan_cleaned"), len(orphaned))+"\n"+strings.Join(paths, "\n"))
+	}
 
 	// 路由样板句:用户在 ~/.deepx/router.yaml 增删过就用他的,否则用内置默认表。
 	// 放在 welcome 之后:解析失败要往聊天区报一行,不能静默(见 router_cmd.go)。
@@ -1673,6 +1693,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setupInput, c = m.setupInput.Update(msg)
 			return m, c
 		}
+		// AskUser 的「其他」行:粘贴归它,用户能直接贴路径 / 长答案(issue #242)。
+		if m.askPending && m.askQIdx < len(m.askQuestions) &&
+			m.askOptIdx == askCustomIdx(m.askQuestions[m.askQIdx]) {
+			var c tea.Cmd
+			m.askInput, c = m.askInput.Update(msg)
+			if !m.askQuestions[m.askQIdx].Multiple && strings.TrimSpace(m.askInput.Value()) != "" {
+				m.clearAskPresets()
+			}
+			m.askWarn = false
+			m.syncAskCustom()
+			m.refreshViewport()
+			return m, c
+		}
 		// mcp-add modal 期间,转发给 mcpAddInput(允许粘贴命令)
 		if m.showMcpAdd {
 			var c tea.Cmd
@@ -2128,58 +2161,86 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 选中只认空格;没选就按回车 → 红色闪烁提示,不前进/提交,逼用户记住用空格选。
 		if m.askPending {
 			q := m.askQuestions[m.askQIdx]
+			// 光标停在末尾的「其他」行时,这一行是个输入框:除导航/提交外的按键都归它,
+			// 这样空格能打出空格、←→ 能移文本光标(issue #242)。切题因此改用 Tab。
+			onCustom := m.askOptIdx == askCustomIdx(q)
+			// gotoQuestion 切题:先把输入框内容回写本题,再把目标题的文本装进输入框。
+			gotoQuestion := func(qi int) {
+				m.syncAskCustom()
+				m.askQIdx = qi
+				m.askOptIdx = 0
+				m.askWarn = false
+				m.loadAskCustom(qi)
+			}
 			switch msg.String() {
 			case "up", "k":
-				if m.askOptIdx > 0 {
-					m.askOptIdx--
+				if !onCustom || msg.String() == "up" {
+					if m.askOptIdx > 0 {
+						m.askOptIdx--
+					}
+					m.refreshViewport()
+					return m, nil
+				}
+			case "down", "j":
+				if !onCustom || msg.String() == "down" {
+					if m.askOptIdx < askCustomIdx(q) {
+						m.askOptIdx++
+					}
+					m.refreshViewport()
+					return m, nil
+				}
+			case "tab":
+				if m.askQIdx < len(m.askQuestions)-1 {
+					gotoQuestion(m.askQIdx + 1)
 				}
 				m.refreshViewport()
 				return m, nil
-			case "down", "j":
-				if m.askOptIdx < len(q.Options)-1 {
-					m.askOptIdx++
+			case "shift+tab":
+				if m.askQIdx > 0 {
+					gotoQuestion(m.askQIdx - 1)
 				}
 				m.refreshViewport()
 				return m, nil
 			case " ", "space":
-				if q.Multiple {
-					m.askSelected[m.askQIdx][m.askOptIdx] = !m.askSelected[m.askQIdx][m.askOptIdx]
-				} else {
-					for i := range m.askSelected[m.askQIdx] {
-						m.askSelected[m.askQIdx][i] = false
+				if !onCustom {
+					if q.Multiple {
+						m.askSelected[m.askQIdx][m.askOptIdx] = !m.askSelected[m.askQIdx][m.askOptIdx]
+					} else {
+						m.clearAskPresets()
+						m.askSelected[m.askQIdx][m.askOptIdx] = true
+						m.askInput.SetValue("") // 单选:选了预设项就把「其他」清掉,保持互斥
 					}
-					m.askSelected[m.askQIdx][m.askOptIdx] = true
+					m.askWarn = false // 已用空格选,撤掉提示
+					m.refreshViewport()
+					return m, nil
 				}
-				m.askWarn = false // 已用空格选,撤掉提示
-				m.refreshViewport()
-				return m, nil
 			case "left", "h":
-				if m.askQIdx > 0 {
-					m.askQIdx--
-					m.askOptIdx = 0
-					m.askWarn = false
+				if !onCustom {
+					if m.askQIdx > 0 {
+						gotoQuestion(m.askQIdx - 1)
+					}
+					m.refreshViewport()
+					return m, nil
 				}
-				m.refreshViewport()
-				return m, nil
 			case "right", "l":
-				if m.askQIdx < len(m.askQuestions)-1 {
-					m.askQIdx++
-					m.askOptIdx = 0
-					m.askWarn = false
+				if !onCustom {
+					if m.askQIdx < len(m.askQuestions)-1 {
+						gotoQuestion(m.askQIdx + 1)
+					}
+					m.refreshViewport()
+					return m, nil
 				}
-				m.refreshViewport()
-				return m, nil
 			case "enter":
-				// 当前题必须先用空格选;没选就回车 → 亮红提示,原地不动。
-				if !askQuestionAnswered(m.askSelected[m.askQIdx]) {
+				m.syncAskCustom()
+				// 当前题必须先用空格选,或在「其他」里写点东西;都没有就回车 → 亮红提示,原地不动。
+				if !askQuestionAnswered(m.askSelected[m.askQIdx], m.askCustomText(m.askQIdx)) {
 					m.askWarn = true
 					m.refreshViewport()
 					return m, m.spinner.Tick // 确保后续 tick 驱动闪烁
 				}
 				m.askWarn = false
 				if m.askQIdx < len(m.askQuestions)-1 {
-					m.askQIdx++
-					m.askOptIdx = 0
+					gotoQuestion(m.askQIdx + 1)
 					m.refreshViewport()
 					return m, nil
 				}
@@ -2197,10 +2258,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.broadcast(web.Event{Kind: "ask_resolved"})
 				m.refreshViewport()
 				return m, func() tea.Msg { return reviewResultMsg{} }
-			case "pgup", "pgdown", "pageup", "pagedown", "home", "end", "ctrl+u", "ctrl+d":
-				// 卡片已内联进对话流:翻页/顶底键照常滚动 chat 回看历史,不被选项交互吞掉(issue #134)。
+			case "pgup", "pgdown", "pageup", "pagedown", "ctrl+u", "ctrl+d":
+				// 卡片已内联进对话流:翻页键照常滚动 chat 回看历史,不被选项交互吞掉(issue #134)。
+				// home/end 不在此列 —— 在「其他」行它们是行首/行尾,归输入框(下面的兜底分支)。
 				var c tea.Cmd
 				m.chatViewport, c = m.chatViewport.Update(msg)
+				return m, c
+			case "home", "end":
+				if !onCustom {
+					var c tea.Cmd
+					m.chatViewport, c = m.chatViewport.Update(msg)
+					return m, c
+				}
+			}
+			// 兜底:光标在「其他」行时,上面没接走的按键(可见字符、退格、←→、home/end…)全给输入框。
+			// 文本从空变非空 = 选中了「其他」;单选题里这等于放弃预设项,所以顺手清掉它们。
+			if onCustom {
+				before := m.askInput.Value()
+				var c tea.Cmd
+				m.askInput, c = m.askInput.Update(msg)
+				if m.askInput.Value() != before {
+					m.askWarn = false
+					if !q.Multiple && strings.TrimSpace(m.askInput.Value()) != "" {
+						m.clearAskPresets()
+					}
+					m.syncAskCustom()
+				}
+				m.refreshViewport()
 				return m, c
 			}
 			return m, nil
@@ -2718,6 +2802,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, q := range msg.Questions {
 			m.askSelected[i] = make([]bool, len(q.Options))
 		}
+		m.askCustom = make([]string, len(msg.Questions))
+		m.askInput = newAskInput()
 		m.status = "tool"
 		// 同步给浏览器:web 端也弹同样的选择框。
 		m.broadcast(web.Event{Kind: "ask_request", Questions: msg.Questions})

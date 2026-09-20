@@ -6,17 +6,72 @@ import (
 	"strings"
 	"time"
 
+	"deepx/agent"
+
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 )
 
-// askQuestionAnswered 判断某题是否已勾选(至少一个选项为 true)。
-func askQuestionAnswered(sel []bool) bool {
+// newAskInput 造「其他」行的输入框。窄一点(46)是为了连同行首标记一起塞进 54 宽的卡片内容区。
+func newAskInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = "" // 去掉默认 "> ",行首已有 ▸ / ✎ 标记
+	ti.Placeholder = "其他（直接输入你的答案）"
+	ti.CharLimit = 500
+	ti.SetWidth(46)
+	ti.Focus()
+	return ti
+}
+
+// askCustomIdx 是「其他」输入行在选项列表里的下标 —— 恒为真实选项之后的那一行。
+func askCustomIdx(q agent.AskQuestion) int { return len(q.Options) }
+
+// askQuestionAnswered 判断某题是否已作答:勾了任一预设项,或「其他」里写了字(issue #242)。
+func askQuestionAnswered(sel []bool, custom string) bool {
+	if strings.TrimSpace(custom) != "" {
+		return true
+	}
 	for _, on := range sel {
 		if on {
 			return true
 		}
 	}
 	return false
+}
+
+// askCustomText 取某题「其他」的文本:当前题以输入框为准(用户正在打字,还没回写),其余取存档。
+func (m model) askCustomText(qi int) string {
+	if qi == m.askQIdx {
+		return strings.TrimSpace(m.askInput.Value())
+	}
+	if qi < len(m.askCustom) {
+		return strings.TrimSpace(m.askCustom[qi])
+	}
+	return ""
+}
+
+// syncAskCustom 把输入框内容回写到当前题的存档。切题 / 提交前必须调,否则刚打的字会丢。
+func (m *model) syncAskCustom() {
+	if m.askQIdx < len(m.askCustom) {
+		m.askCustom[m.askQIdx] = m.askInput.Value()
+	}
+}
+
+// loadAskCustom 把目标题的存档装回输入框(切题时用)。
+func (m *model) loadAskCustom(qi int) {
+	v := ""
+	if qi < len(m.askCustom) {
+		v = m.askCustom[qi]
+	}
+	m.askInput.SetValue(v)
+}
+
+// clearAskPresets 清掉当前题所有预设项的勾选。单选题里用户往「其他」打字时调 ——
+// 单选就该互斥,自由作答同样是"一个答案"。
+func (m *model) clearAskPresets() {
+	for i := range m.askSelected[m.askQIdx] {
+		m.askSelected[m.askQIdx][i] = false
+	}
 }
 
 // === AskUser 选择题弹窗 ===
@@ -43,6 +98,11 @@ func (m model) buildAskAnswer() string {
 				sel = append(sel, q.Options[oi].Value)
 			}
 		}
+		// 「其他」的自由文本作为一个普通答案值混进 selected —— 模型侧不需要知道它是自由输入的,
+		// 拿到的就是用户的答案本身(issue #242)。
+		if c := m.askCustomText(qi); c != "" {
+			sel = append(sel, c)
+		}
 		out.Answers = append(out.Answers, ans{Question: q.Question, Selected: sel})
 	}
 	b, err := json.Marshal(out)
@@ -67,6 +127,9 @@ func (m model) askRecord(skipped bool) string {
 			if on {
 				sel = append(sel, q.Options[oi].Label)
 			}
+		}
+		if c := m.askCustomText(qi); c != "" {
+			sel = append(sel, c)
 		}
 		ans := "（未选）"
 		if len(sel) > 0 {
@@ -132,14 +195,53 @@ func (m model) askUserBlock() string {
 		rows = append(rows, seg)
 	}
 
-	// 操作提示:选中只认空格,Enter 仅用于前进/提交。
+	// 末行:「其他」自由输入(issue #242)。预设选项覆盖不到时,用户在这里直接写答案。
+	// 光标停在这行时渲染真输入框(带光标);不在这行时渲染已写的文本或提示语。
+	custom := m.askCustomText(m.askQIdx)
+	onCustom := m.askOptIdx == askCustomIdx(q)
+	var box, body string
+	if custom != "" {
+		box = "●"
+		if q.Multiple {
+			box = "☑"
+		}
+	} else {
+		box = "○"
+		if q.Multiple {
+			box = "☐"
+		}
+	}
+	if onCustom {
+		body = m.askInput.View()
+	} else if custom != "" {
+		body = custom
+	} else {
+		body = "其他（移到这里直接输入）"
+	}
+	marker := "  "
+	if onCustom {
+		marker = "▸ "
+	}
+	seg := marker + box + " " + body
+	switch {
+	case custom != "":
+		seg = on.Render(marker+box+" ") + body // 文本本身不上色,免得盖掉输入框自己的光标样式
+	case onCustom:
+		seg = lipgloss.NewStyle().Foreground(softFgColor).Render(marker+box+" ") + body
+	default:
+		seg = dim.Render(seg)
+	}
+	rows = append(rows, seg)
+
+	// 操作提示:预设项只认空格,「其他」行直接打字;Enter 仅用于前进/提交。
 	nextLabel := "Enter 提交"
 	if m.askQIdx < len(m.askQuestions)-1 {
 		nextLabel = "Enter 下一题"
 	}
 	hint := "↑↓ 移动 · 空格 选择 · " + nextLabel
 	if len(m.askQuestions) > 1 {
-		hint += " · ←→ 切题"
+		// 光标在「其他」行时 ←→ 归输入框移动光标,切题改用 Tab(见按键处理)。
+		hint += " · Tab 切题"
 	}
 	footer := dim.Render(hint + " · Esc 取消")
 
@@ -152,7 +254,7 @@ func (m model) askUserBlock() string {
 		if !blinkOn {
 			c = lipgloss.Color("88") // 暗红,形成闪烁
 		}
-		warn := lipgloss.NewStyle().Bold(true).Foreground(c).Render("⚠ 请先用【空格】选中,再按回车")
+		warn := lipgloss.NewStyle().Bold(true).Foreground(c).Render("⚠ 请先用【空格】选中,或在「其他」行输入答案")
 		parts = append(parts, "", warn)
 	}
 	parts = append(parts, "", footer)

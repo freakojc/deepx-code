@@ -153,6 +153,12 @@
                        :checked="askSel[qi] && askSel[qi][oi]" @change="toggleAsk(qi, oi, q.multiple)">
                 <span>{{ opt.label }}</span>
               </label>
+              <!-- 「其他」自由输入(issue #242):预设选项覆盖不到时直接写。非空即视为选中 -->
+              <label class="ask-opt ask-other" :class="{ on: (askCustom[qi] || '').trim() }">
+                <span class="ask-other-label">{{ t('ask.other') }}</span>
+                <input type="text" class="ask-other-input" :placeholder="t('ask.other_ph')"
+                       v-model="askCustom[qi]" @input="onAskCustom(qi, q.multiple)">
+              </label>
             </div>
             <div class="ask-actions">
               <button class="reject" @click="cancelAsk()">{{ t('ask.cancel') }}</button>

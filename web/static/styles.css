@@ -303,6 +303,15 @@ body {
 .ask-opt.on { border-color: var(--accent); background: rgba(94,234,212,.10); }
 .ask-opt input { accent-color: var(--accent); cursor: pointer; }
 
+/* 「其他」自由输入行(issue #242):跟选项等宽同框,只是把单选/复选圈换成一个文本框。 */
+.ask-other { cursor: text; }
+.ask-other-label { color: var(--dim); flex: 0 0 auto; }
+.ask-other-input {
+  flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none;
+  color: var(--fg); font: inherit; cursor: text; padding: 0;
+}
+.ask-other-input::placeholder { color: var(--dim); opacity: .75; }
+
 /* 左栏底部操作按钮 */
 .pane-actions { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--border); }
 .pane-actions button {
