@@ -418,6 +418,9 @@ func (m model) View() tea.View {
 // normalizeFrame 把整帧锁到精确 width × height:行数不足补空行/过多截尾,
 // 每行宽度不足补空格/过宽用 ansi.Cut 切到精确 width。
 func normalizeFrame(s string, width, height int) string {
+	// 锁宽之前先体检(仅 DEEPX_DUMP_FRAME 打开时生效):记录的是"上游交上来时"的样子,
+	// 锁宽之后一切都被抹平,就看不出是谁算错了。见 framecheck.go。
+	checkFrame(s, width, height)
 	// 最后一道:右栏状态区、banner 等也可能携带来自 LLM / 工具输出的裸 \r
 	// (主题串、模型名等)。聊天区在 refreshViewport 已经清过,这里兜住其余来源。
 	//
@@ -427,6 +430,9 @@ func normalizeFrame(s string, width, height int) string {
 		s = strings.ReplaceAll(s, "\r\n", "\n")
 		s = strings.ReplaceAll(s, "\r", "")
 	}
+	// 同理兜住 \t / \b / \v / \f 等"挪光标但不占列宽"的字符 —— 右栏状态区、banner、
+	// modal 也可能带进来,它们不经过 padLinesToWidth。见 cursormove.go。
+	s = sanitizeCursorMovers(s)
 	lines := strings.Split(s, "\n")
 	if len(lines) > height {
 		lines = lines[:height]

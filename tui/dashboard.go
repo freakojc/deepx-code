@@ -36,6 +36,9 @@ func padLinesToWidth(content string, w int) string {
 		content = strings.ReplaceAll(content, "\r\n", "\n")
 		content = strings.ReplaceAll(content, "\r", "\n")
 	}
+	// \r 只是这一族里的一个成员:\t(跳制表位)、\b(左退)、\v \f(下移)同样是
+	// "库算 0 列、终端照挪光标",补白算对了也会把这一行画歪。见 cursormove.go。
+	content = sanitizeCursorMovers(content)
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		cur := lineDisplayWidth(line)

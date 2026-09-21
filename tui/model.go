@@ -4427,7 +4427,7 @@ func (m *model) collectSelectionText() string {
 	if w <= 0 {
 		return ""
 	}
-	content := m.renderChatBaseContent(w)
+	content := m.renderChatDisplayContent(w)
 	return extractSelectionText(content, m.selAnchor, m.selEnd, w)
 }
 
@@ -4508,6 +4508,24 @@ func (m *model) mdRenderer(width int) *glamour.TermRenderer {
 	return r
 }
 
+// renderChatDisplayContent 是 chat 区"准备上屏"的唯一入口:基础渲染 + 控制字符归一化。
+//
+// **归一化必须在这里、在分行之前做,不能等渲染完再洗。**
+//
+// viewport 按行切分与 softWrap 都把裸 \r 当行内字符:一条 "A\rB" 会被当成一个逻辑行,
+// TotalLineCount 因此偏小,YOffset / 视口取行全部错位 —— 表现就是历史里"吃掉上一条对话",
+// 以及整帧行数对不上、聊天内容叠进输入区(issue #232)。\t 是同一个坑的另一半:它在
+// ansi.StringWidth 眼里是 0 列,viewport 会把一条实际超宽的行判成没超宽(见 cursormove.go)。
+//
+// padLinesToWidth 里也有一道同样的归一化(见 dashboard.go),但它作用在
+// m.chatViewport.View() 的**输出**上:那时候行已经选错了,把字符洗干净也换不回正确的行。
+//
+// refreshViewport(上屏)与 collectSelectionText(复制)共用本函数,选区行号才能和用户
+// 屏幕上看到的一一对应 —— 早先两边一个洗过 \r、一个没洗,含 \r 的历史里复制会错行。
+func (m *model) renderChatDisplayContent(w int) string {
+	return sanitizeCursorMovers(normalizeNewlines(m.renderChatBaseContent(w)))
+}
+
 // renderChatBaseContent 渲染 chat 区基础内容(含色条 / 思考动画 / plan),不含选区高亮。
 // refreshViewport 和 collectSelectionText 共享这份输出,保证"屏幕显示"和"复制到剪贴板"基于
 // 同一份文本(避免之前 collectSelectionText 走 ansi.Wrap raw,行号跟 markdown 渲染对不上的 bug)。
@@ -4563,7 +4581,7 @@ func (m *model) refreshViewport() {
 	atBottom := m.chatViewport.AtBottom()
 	w := m.chatViewport.Width()
 
-	content := m.renderChatBaseContent(w)
+	content := m.renderChatDisplayContent(w)
 	if m.selecting && w > 0 {
 		content = applySelectionHighlight(content, m.selAnchor, m.selEnd, w)
 	}
@@ -4575,7 +4593,6 @@ func (m *model) refreshViewport() {
 	//
 	// padLinesToWidth 里早有一道同样的归一化(见 dashboard.go),但它作用在
 	// m.chatViewport.View() 的**输出**上:那时候行已经选错了,把字符洗干净也换不回正确的行。
-	content = normalizeNewlines(content)
 	m.chatViewport.SetContent(content)
 	if atBottom {
 		m.chatViewport.GotoBottom()
