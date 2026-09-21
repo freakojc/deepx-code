@@ -88,3 +88,49 @@ func TestFrameColumnLockWithTabs(t *testing.T) {
 		}
 	}
 }
+
+// TestOSCHyperlinkSurvives 回归:OSC 8 超链接的 BEL 终止符不能被当成 C0 删掉。
+//
+// glamour 把链接渲染成 ESC]8;id=…;URL BEL 链接文字 ESC]8;; BEL。BEL(0x07)是 C0,
+// 早先 dropCursorMovers 按字符一刀切会把它删掉 —— OSC 变成未结束,终端把紧随其后的
+// 正文一并吞掉,表现为"本地 Web 面板已就绪"显示了、后面的地址整段消失。
+func TestOSCHyperlinkSurvives(t *testing.T) {
+	url := "http://127.0.0.1:58251/?t=abc123"
+	in := "就绪 \x1b]8;id=1;" + url + "\x07" + url + "\x1b]8;;\x07 尾巴"
+	got := sanitizeCursorMovers(in)
+	if got != in {
+		t.Errorf("OSC 超链接被改动了:\n got %q\nwant %q", got, in)
+	}
+	if strings.Count(got, "\x07") != 2 {
+		t.Errorf("BEL 终止符数量不对: %d,want 2(开链接一个、关链接一个)", strings.Count(got, "\x07"))
+	}
+}
+
+// TestOSCWithSTTerminator ST(ESC \) 形式的终止符同样要保住。
+func TestOSCWithSTTerminator(t *testing.T) {
+	in := "a\x1b]8;;https://x.example\x1b\\link\x1b]8;;\x1b\\b"
+	if got := sanitizeCursorMovers(in); got != in {
+		t.Errorf("ST 终止的 OSC 被改动了:\n got %q\nwant %q", got, in)
+	}
+}
+
+// TestControlCharsStillDroppedOutsideEscapes 正文里的裸控制字符仍然要删掉。
+func TestControlCharsStillDroppedOutsideEscapes(t *testing.T) {
+	in := "a\bb\x07c\x1b[31md\x1b[0m"
+	want := "abc\x1b[31md\x1b[0m"
+	if got := sanitizeCursorMovers(in); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestTabInsideOSCNotExpanded OSC 载荷里的 \t 不该被展开成空格。
+func TestTabInsideOSCNotExpanded(t *testing.T) {
+	in := "x\x1b]8;;http://a\tb\x07txt\x1b]8;;\x07\ty"
+	got := expandTabsLine(in)
+	if !strings.Contains(got, "http://a\tb") {
+		t.Errorf("OSC 内部的 \\t 被展开了: %q", got)
+	}
+	if strings.HasSuffix(got, "\ty") {
+		t.Errorf("正文里的 \\t 没被展开: %q", got)
+	}
+}

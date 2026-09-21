@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -43,35 +44,87 @@ func expandTabsLine(line string) string {
 	if !strings.ContainsRune(line, '\t') {
 		return line
 	}
-	parts := strings.Split(line, "\t")
 	var sb strings.Builder
-	sb.Grow(len(line) + len(parts)*tabStop)
+	sb.Grow(len(line) + tabStop)
 	col := 0
-	for i, p := range parts {
-		sb.WriteString(p)
-		col += ansi.StringWidth(p)
-		if i == len(parts)-1 {
-			break
+	for i := 0; i < len(line); {
+		// 转义序列原样带过,且不计列宽 —— OSC 载荷(如超链接 URL)里若含 \t 也不该被展开。
+		if line[i] == 0x1B {
+			n := escSeqLen(line[i:])
+			sb.WriteString(line[i : i+n])
+			i += n
+			continue
 		}
-		pad := tabStop - col%tabStop
-		sb.WriteString(strings.Repeat(" ", pad))
-		col += pad
+		if line[i] == '\t' {
+			pad := tabStop - col%tabStop
+			sb.WriteString(strings.Repeat(" ", pad))
+			col += pad
+			i++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(line[i:])
+		sb.WriteString(line[i : i+size])
+		col += ansi.StringWidth(string(r))
+		i += size
 	}
 	return sb.String()
 }
 
-// dropCursorMovers 删掉除 \n / ESC 之外的全部 C0 控制字符与 DEL。
+// dropCursorMovers 删掉正文里除 \n 之外的 C0 控制字符与 DEL,但**整条转义序列原样保留**。
 // 调用方应先展开 \t(否则这里会把它直接删掉,丢掉缩进)。
+//
+// **必须跳过转义序列内部,不能按字符一刀切。** OSC 序列(ESC ] … )以 BEL(0x07)或 ST 终止,
+// 而 BEL 本身是 C0 —— 按字符删会把终止符抹掉,OSC 变成未结束状态,终端会把紧随其后的
+// 正文一并吞掉。glamour 把链接渲染成 OSC 8 超链接(ESC]8;id=…;URL BEL 链接文字 ),
+// 这个坑的表现就是"本地 Web 面板已就绪"显示出来了、后面的地址整段消失。
 func dropCursorMovers(s string) string {
 	if !strings.ContainsFunc(s, isCursorMover) {
 		return s
 	}
-	return strings.Map(func(r rune) rune {
-		if isCursorMover(r) {
-			return -1
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] == 0x1B {
+			n := escSeqLen(s[i:])
+			sb.WriteString(s[i : i+n])
+			i += n
+			continue
 		}
-		return r
-	}, s)
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if !isCursorMover(r) {
+			sb.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return sb.String()
+}
+
+// escSeqLen 返回 s 开头那条转义序列的字节长度(含终止符);s[0] 必须是 ESC。
+// 序列不完整时返回 len(s) —— 宁可整段原样带过,也不要半途截断。
+func escSeqLen(s string) int {
+	if len(s) < 2 {
+		return len(s)
+	}
+	switch s[1] {
+	case '[': // CSI: ESC [ 参数 中间字节 final(0x40–0x7E)
+		for i := 2; i < len(s); i++ {
+			if s[i] >= 0x40 && s[i] <= 0x7E {
+				return i + 1
+			}
+		}
+		return len(s)
+	case ']', 'P', 'X', '^', '_': // OSC / DCS / SOS / PM / APC:BEL 或 ST(ESC \\) 终止
+		for i := 2; i < len(s); i++ {
+			if s[i] == 0x07 {
+				return i + 1
+			}
+			if s[i] == 0x1B && i+1 < len(s) && s[i+1] == '\\' {
+				return i + 2
+			}
+		}
+		return len(s)
+	}
+	return 2 // ESC + 单字节(如 ESC = / ESC >)
 }
 
 // sanitizeCursorMovers 是给"已排版、准备上屏"的多行文本用的总入口:
