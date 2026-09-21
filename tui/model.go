@@ -4539,6 +4539,10 @@ func (m *model) renderChatBaseContent(w int) string {
 	// Update 工具的 ~~~diff ... ~~~ 块单独走 colorizeDiffBlock 染色,fence 行不显示,
 	// `-` 行染红、`+` 行染绿、"... (N more lines)" 染暗 —— 跟 markdown diff 渲染观感一致。
 	content := m.chatContent.Render(w, func(raw, kind string, width int) string {
+		// 全角标点折半必须在这里 —— 一切渲染之前。glamour 按列宽折行,全角 2 列、半角 1 列,
+		// 换完再渲染折行才算得对;渲染完再换,行会凭空变短,排好的版就废了。
+		// 见 asciiparens.go(默认仅 VS Code 下生效)。
+		raw = foldFullwidthPunct(raw)
 		// 用户回合走气泡(左块条 + 整段底色),不走 glamour / 色条,见 renderUserBubble。
 		if kind == kindUser {
 			return renderUserBubble(stripVS16(stripEmojiZWJ(strings.TrimRight(ensureEmojiSpacing(raw), "\n"))), width)
