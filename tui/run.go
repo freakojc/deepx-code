@@ -56,6 +56,7 @@ func Run(models agent.ModelConfig, needsSetup bool, version string) error {
 		srv.OnAskAnswer = func(answer string) { p.Send(webAskAnswerMsg{answer: answer}) }
 		srv.OnInterrupt = func() { p.Send(webInterruptMsg{}) }
 		srv.OnCompact = func() { p.Send(webCompactMsg{}) }
+		srv.OnClearQueue = func() { p.Send(webClearQueueMsg{}) }
 		srv.OnMcpAdd = func(cfg mcp.ServerConfig) { p.Send(webMcpAddMsg{cfg: cfg}) }
 		srv.OnMcpDelete = func(name string) { p.Send(webMcpDeleteMsg{name: name}) }
 		srv.OnListFiles = func() []string {

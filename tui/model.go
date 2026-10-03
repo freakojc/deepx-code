@@ -550,6 +550,7 @@ type webSwitchSessionMsg struct{ id string }        // 切换到某会话
 type webRenameSessionMsg struct{ id, title string } // 重命名会话
 type webDeleteSessionMsg struct{ id string }        // 删除会话
 type webSetModelMsg struct{ role string }           // 路由 auto/flash/pro
+type webClearQueueMsg struct{}                      // 取消全部待发送并复制到剪贴板
 type webSetModeMsg struct{ mode string }            // 权限模式 plan/auto/review
 type webSetSandboxMsg struct{ mode string }         // 沙箱 off/native/docker
 type webSetWorkingModeMsg struct{ mode string }     // 工作模式
@@ -995,6 +996,34 @@ func (m model) broadcast(ev web.Event) {
 // (对齐 TUI 的 queuedDisplayLines)。queuedInput 每次增删后调用;空列表即清空前端展示。
 func (m model) broadcastQueued() {
 	m.broadcast(web.Event{Kind: "queued", Queued: append([]string(nil), m.queuedInput...)})
+}
+
+// clipboardCopy 是取消待发送时写剪贴板的入口,包级变量以便测试注入假实现
+// (不注入的话单测会把开发机的剪贴板当真写掉)。
+var clipboardCopy = writeClipboardText
+
+// cancelQueuedInput 取消全部待发送队列:先把所有排队原文(按顺序、空行分隔)复制进系统剪贴板,
+// **复制成功才清空队列** —— 复制失败就保留原文,宁可让用户手动删,不能把打好的话弄丢。
+// 只动 queuedInput,不碰 cancelAgent / streamCh,正在运行的任务不受影响。
+// 终端 Ctrl+Q 与 web「取消发送」按钮共用此入口(TUI 是本机进程,剪贴板在它手里,
+// 浏览器侧点按钮同样经这条路径复制,行为一致)。
+func (m *model) cancelQueuedInput() {
+	if len(m.queuedInput) == 0 {
+		m.appendChat("System", T("misc.queued_empty"))
+		m.refreshViewport()
+		return
+	}
+	text := strings.Join(m.queuedInput, "\n\n")
+	if err := clipboardCopy(text); err != nil {
+		m.appendChat("System", fmt.Sprintf(T("misc.queued_copy_failed"), err))
+		m.refreshViewport()
+		return
+	}
+	n := len(m.queuedInput)
+	m.queuedInput = nil
+	m.broadcastQueued() // 列表空 → web 待发送区同步消失
+	m.appendChat("System", fmt.Sprintf(T("misc.queued_canceled"), n))
+	m.refreshViewport()
 }
 
 // applyMode 切换权限模式(plan/auto/review),落一条系统提示进历史/会话,并广播给 web。
@@ -1446,6 +1475,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case webSetModelMsg:
 		m.applyModelPin(msg.role) // 内部广播 routing
+		return m, nil
+
+	case webClearQueueMsg:
+		// 浏览器「取消发送」→ 与终端 Ctrl+Q 同一条路径(复制剪贴板 → 清队列 → 广播 queued 空)。
+		// 只动待发送队列,不打断正在跑的 stream。
+		m.cancelQueuedInput()
 		return m, nil
 
 	case webSetModeMsg:
@@ -2484,6 +2519,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.appendChat("System", T("misc.ctrlc_again_to_quit"))
 			m.refreshViewport()
+			return m, nil
+		case "ctrl+q":
+			// 取消全部待发送队列 → 复制到剪贴板(成功才清空)。只动 queuedInput,
+			// 不碰 cancelAgent / streamCh —— 正在跑的任务不受任何影响。
+			// 与 bubbles textarea 键位无冲突(其 KeyMap 未绑定 ctrl+q),raw mode 下 XON/XOFF 已关。
+			m.cancelQueuedInput()
 			return m, nil
 		case "esc":
 			// 正在拉 docker 镜像 → Esc 取消拉取,保持 native。

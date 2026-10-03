@@ -214,7 +214,10 @@
         <!-- 待发送区:流式/压缩中排队的消息,本轮结束后自动依次发出(对齐 TUI 输入框上方,issue #161) -->
         <div v-if="queued.length" class="queued">
           <div class="queued-head">⏳ {{ t('queued.title') }}</div>
-          <div v-for="(q, i) in queued" :key="i" class="queued-item">{{ q }}</div>
+          <div v-for="(q, i) in queued" :key="i" class="queued-item">
+            <span class="queued-text">{{ q }}</span>
+            <button type="button" class="queued-cancel" :title="t('queued.cancel_hint')" @click="cancelQueued()">{{ t('queued.cancel') }}</button>
+          </div>
         </div>
 
         <form class="composer" @submit.prevent="send">

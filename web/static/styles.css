@@ -144,10 +144,17 @@ body {
 }
 .queued-head { color: var(--dim); font-size: 11px; margin-bottom: 4px; letter-spacing: .02em; }
 .queued-item {
+  display: flex; align-items: center; gap: 8px;
   color: var(--fg); padding: 2px 0; line-height: 1.4;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.queued-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queued-item::before { content: "↳ "; color: var(--dim); }
+/* 行右侧「取消发送」:复制全部待发送→清空队列(后端执行)。与 .pane-actions 按钮同款淡边框,悬停描强调色 */
+.queued-cancel {
+  flex: none; font: inherit; font-size: 11px; padding: 1px 8px; border-radius: 8px; cursor: pointer;
+  background: var(--bg2); border: 1px solid var(--border); color: var(--dim);
+}
+.queued-cancel:hover { color: var(--fg); border-color: var(--accent2); }
 
 /* 输入区 */
 /* 输入框:整体一张圆角卡片,聚焦时高亮描边 + 柔光 */

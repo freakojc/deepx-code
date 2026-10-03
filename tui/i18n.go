@@ -761,6 +761,22 @@ var translations = map[string]map[Lang]string{
 		LangZH: "再按一次 Esc 中断生成(1 秒内;或按 Ctrl+C 单按即停)",
 		LangEN: "Press Esc again to interrupt (within 1s; or Ctrl+C to stop in one press)",
 	},
+	"misc.queued_empty": {
+		LangZH: "没有待发送的消息。",
+		LangEN: "No queued messages.",
+	},
+	"misc.queued_copy_failed": {
+		LangZH: "**取消待发送失败**:复制到剪贴板失败,队列已保留原文 — %v",
+		LangEN: "**Cancel failed**: clipboard copy error, queue kept intact — %v",
+	},
+	"misc.queued_canceled": {
+		LangZH: "已取消 %d 条待发送消息,原文已复制到剪贴板。",
+		LangEN: "Canceled %d queued message(s); originals copied to clipboard.",
+	},
+	"misc.queued_cancel_hint": {
+		LangZH: " · Ctrl+Q 复制并取消全部",
+		LangEN: " · Ctrl+Q copy & cancel all",
+	},
 	"misc.input_placeholder": {
 		LangZH: "Type a message…  Enter 发送 · ctrl+j 换行 · ctrl+c 清空 · Esc×2 中断",
 		LangEN: "Type a message…  Enter send · ctrl+j newline · ctrl+c clear · Esc×2 interrupt",

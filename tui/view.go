@@ -513,6 +513,8 @@ func (m model) queuedDisplayLines(width int) []string {
 	if overflow > 0 {
 		lines = append(lines, gutter+dim("… +"+strconv.Itoa(overflow)))
 	}
+	// 队列非空时给出快捷键提示(不打断当前任务,只取消待发送)。
+	lines = append(lines, gutter+dim(T("misc.queued_cancel_hint")))
 	return lines
 }
 
