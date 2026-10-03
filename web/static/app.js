@@ -17,6 +17,8 @@ const I18N = {
     'placeholder.idle': '输入消息,Enter 发送,Shift+Enter 换行',
     'placeholder.streaming': '正在生成…(可继续输入,发送后排队)',
     'queued.title': '待发送(本轮结束后自动发出)',
+    'queued.cancel': '取消发送',
+    'queued.cancel_hint': '把全部待发送消息复制到剪贴板并取消(不影响正在运行的任务)',
     'review.title': '需要确认',
     'review.approve': '批准',
     'review.reject': '拒绝',
@@ -109,6 +111,8 @@ const I18N = {
     'placeholder.idle': 'Type a message — Enter to send, Shift+Enter for newline',
     'placeholder.streaming': 'Generating… (you can keep typing; it queues after send)',
     'queued.title': 'Queued (sent automatically when this turn ends)',
+    'queued.cancel': 'Cancel',
+    'queued.cancel_hint': 'Copy all queued messages to clipboard and cancel (does not interrupt the running task)',
     'review.title': 'Confirmation needed',
     'review.approve': 'Approve',
     'review.reject': 'Reject',
@@ -944,6 +948,10 @@ createApp({
     setLang(lang) { this.post('/api/lang', { lang }); },
     setModel(role) { this.post('/api/model', { role }); },
     setProvider(name) { this.post('/api/provider', { name }); },
+    // 取消全部待发送:后端(TUI 进程)把 queuedInput 整份复制进系统剪贴板并清空,
+    // 再经 queued 事件回灌本端 —— 前端不自行清空,避免与服务端快照出现两个真源。
+    // 复制的是同一台机器的剪贴板,浏览器无需 navigator.clipboard(非安全上下文本来就不可靠)。
+    cancelQueued() { this.post('/api/queue-cancel'); },
     setMode(m) { this.post('/api/mode', { mode: m }); },
     setSandbox(m) { this.post('/api/sandbox', { mode: m }); },
     setWorkingMode(m) { this.post('/api/workingmode', { mode: m }); },

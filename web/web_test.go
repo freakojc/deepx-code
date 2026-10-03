@@ -298,7 +298,9 @@ func TestControlEndpoints(t *testing.T) {
 	gotSandbox := make(chan string, 1)
 	gotWM := make(chan string, 1)
 	gotLang := make(chan string, 1)
+	gotQueue := make(chan struct{}, 1)
 	srv.OnSetLang = func(l string) { gotLang <- l }
+	srv.OnClearQueue = func() { gotQueue <- struct{}{} }
 	srv.OnNewSession = func() { gotNew <- struct{}{} }
 	srv.OnSwitchSession = func(id string) { gotSwitch <- id }
 	srv.OnRenameSession = func(id, title string) { gotRename <- [2]string{id, title} }
@@ -363,6 +365,19 @@ func TestControlEndpoints(t *testing.T) {
 	postJSON(t, base+"/api/lang?t="+token, map[string]any{"lang": "en"})
 	if got := <-gotLang; got != "en" {
 		t.Fatalf("OnSetLang got %q", got)
+	}
+
+	postJSON(t, base+"/api/queue-cancel?t="+token, map[string]any{})
+	select {
+	case <-gotQueue:
+	case <-time.After(time.Second):
+		t.Fatal("OnClearQueue not called")
+	}
+	// 无 token → 403
+	respQC, _ := http.Post(base+"/api/queue-cancel", "application/json", strings.NewReader("{}"))
+	respQC.Body.Close()
+	if respQC.StatusCode != http.StatusForbidden {
+		t.Fatalf("no-token queue-cancel want 403, got %d", respQC.StatusCode)
 	}
 
 	// 控制态事件应进快照

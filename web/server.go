@@ -50,6 +50,7 @@ type Server struct {
 
 	// 左栏操作:压缩会话 / MCP 增删(均需动 live agent 状态,经回调注入)。
 	OnCompact   func()                 // 手动压缩当前会话(等价 /compact)
+	OnClearQueue func()                  // 取消全部待发送并把原文复制到剪贴板(web 按钮 / 终端 Ctrl+Q 同一路径)
 	OnMcpAdd    func(cfg mcp.ServerConfig) // 添加 MCP server 并连接
 	OnMcpDelete func(name string)          // 删除 MCP server 并断连
 }
@@ -189,8 +190,9 @@ func (s *Server) Serve() error {
 	mux.HandleFunc("/api/switch", s.handleSwitch)
 	mux.HandleFunc("/api/session-rename", s.handleSessionRename)
 	mux.HandleFunc("/api/session-delete", s.handleSessionDelete)
-	mux.HandleFunc("/api/model", s.handleModel)
+mux.HandleFunc("/api/model", s.handleModel)
 	mux.HandleFunc("/api/provider", s.handleProvider)
+	mux.HandleFunc("/api/queue-cancel", s.handleQueueCancel)
 	mux.HandleFunc("/api/mode", s.handleMode)
 	mux.HandleFunc("/api/sandbox", s.handleSandbox)
 	mux.HandleFunc("/api/workingmode", s.handleWorkingMode)
@@ -700,6 +702,16 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 	s.postField(w, r, "name", func(name string) {
 		if s.OnSetProvider != nil && name != "" {
 			s.OnSetProvider(name)
+		}
+	})
+}
+
+// handleQueueCancel 浏览器待发送区「取消发送」:POST(无 body)→ OnClearQueue()。
+// 复制与清空都在 TUI 侧做(本机剪贴板归它管),完成与否由 queued 事件回灌,端点不返回结果。
+func (s *Server) handleQueueCancel(w http.ResponseWriter, r *http.Request) {
+	s.postField(w, r, "", func(string) {
+		if s.OnClearQueue != nil {
+			s.OnClearQueue()
 		}
 	})
 }
