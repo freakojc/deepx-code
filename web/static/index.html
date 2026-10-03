@@ -185,6 +185,13 @@
               <span class="sf-dim" v-if="toolCalls.length">· {{ toolCalls.length }} {{ t('done.tools') }}</span>
             </template>
           </div>
+          <label class="ctl" v-if="providers.length">
+            <span class="ctl-label">{{ t('panel.provider') }}</span>
+            <select :value="models.provider" @change="setProvider($event.target.value)">
+              <option v-if="!models.provider" value="" disabled selected>—</option>
+              <option v-for="p in providers" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </label>
           <label class="ctl">
             <span class="ctl-label">{{ t('panel.routing') }}</span>
             <select :value="routing" @change="setModel($event.target.value)">

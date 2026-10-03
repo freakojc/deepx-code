@@ -33,9 +33,13 @@ type Event struct {
 	ModelID string `json:"modelId,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 
-	// models(全量模型名同步:/provider 切供应商后更新 flash/pro 展示名)
-	Flash string `json:"flash,omitempty"`
-	Pro   string `json:"pro,omitempty"`
+	// models(全量模型名同步:/provider 切供应商后更新 flash/pro 展示名,provider 为当前存档名)
+	Flash    string `json:"flash,omitempty"`
+	Pro      string `json:"pro,omitempty"`
+	Provider string `json:"provider,omitempty"`
+
+	// providers(可切换的供应商名列表,提供商下拉的选项)
+	Providers []string `json:"providers,omitempty"`
 
 	// plan(整份)/ plan_status(单节点)
 	Plan     []PlanNode `json:"plan,omitempty"`

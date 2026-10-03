@@ -86,6 +86,7 @@ const I18N = {
     'confirm.ok': '确定',
     'confirm.cancel': '取消',
     'panel.routing': '模型路由',
+    'panel.provider': '提供商',
     'panel.mode': '权限模式',
     'panel.sandbox': '沙箱',
     'panel.workingmode': '工作模式',
@@ -177,6 +178,7 @@ const I18N = {
     'confirm.ok': 'Confirm',
     'confirm.cancel': 'Cancel',
     'panel.routing': 'Routing',
+    'panel.provider': 'Provider',
     'panel.mode': 'Permission',
     'panel.sandbox': 'Sandbox',
     'panel.workingmode': 'Working Mode',
@@ -205,7 +207,7 @@ createApp({
       toolCalls: [],
       usage: null,
       streaming: false,
-      models: { flash: '', pro: '', activeRole: 'flash' },
+      models: { flash: '', pro: '', activeRole: 'flash', provider: '' },
       workspace: '',
       reviewPending: null,
       askPending: null, // ask_request 的 questions 数组,null = 无
@@ -234,6 +236,7 @@ createApp({
       // 控制态(对齐 TUI),由快照 / 增量事件同步
       vendor: '',
       routing: 'auto',
+      providers: [],    // provider.yaml 存档名(「提供商」下拉选项),由 providers 事件 / 快照同步
       mode: 'review',
       sandbox: 'native',
       workingMode: 'karpathy',
@@ -702,6 +705,7 @@ createApp({
       if (s.lang) this.lang = s.lang;
       if (s.vendor) this.vendor = s.vendor;
       if (s.routing) this.routing = s.routing;
+      if (s.providers) this.providers = s.providers;
       if (s.mode) this.mode = s.mode;
       if (s.sandbox) this.sandbox = s.sandbox;
       if (s.workingMode) this.workingMode = s.workingMode;
@@ -791,6 +795,11 @@ createApp({
           if (ev.flash) this.models.flash = ev.flash;
           if (ev.pro) this.models.pro = ev.pro;
           if (ev.role) this.models.activeRole = ev.role;
+          if (ev.provider) this.models.provider = ev.provider;
+          // provider 空串(切到无存档配置)时保留旧值 —— 与后端 hub.apply 的非空守卫一致。
+          break;
+        case 'providers':
+          this.providers = ev.providers || [];
           break;
         case 'plan':
           // createplan → 步骤;todo / 其它 → 计划(对齐 TUI 与后端 hub)
@@ -934,6 +943,7 @@ createApp({
     },
     setLang(lang) { this.post('/api/lang', { lang }); },
     setModel(role) { this.post('/api/model', { role }); },
+    setProvider(name) { this.post('/api/provider', { name }); },
     setMode(m) { this.post('/api/mode', { mode: m }); },
     setSandbox(m) { this.post('/api/sandbox', { mode: m }); },
     setWorkingMode(m) { this.post('/api/workingmode', { mode: m }); },

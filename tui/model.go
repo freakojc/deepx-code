@@ -550,6 +550,7 @@ type webSwitchSessionMsg struct{ id string }        // 切换到某会话
 type webRenameSessionMsg struct{ id, title string } // 重命名会话
 type webDeleteSessionMsg struct{ id string }        // 删除会话
 type webSetModelMsg struct{ role string }           // 路由 auto/flash/pro
+type webSetProviderMsg struct{ name string }        // 提供商切换(provider.yaml 存档名)
 type webSetModeMsg struct{ mode string }            // 权限模式 plan/auto/review
 type webSetSandboxMsg struct{ mode string }         // 沙箱 off/native/docker
 type webSetWorkingModeMsg struct{ mode string }     // 工作模式
@@ -1059,6 +1060,7 @@ func (m model) broadcastControlState() {
 	}
 	m.broadcast(web.Event{Kind: "vendor", Text: endpointHost(m.models)})
 	m.broadcast(web.Event{Kind: "routing", Text: m.modelPin})
+	m.broadcastProviderState() // 浏览器「提供商」下拉:存档列表 + 当前选中名 + 模型名(见 setup_modal.go)
 	m.broadcast(web.Event{Kind: "mode", Text: string(m.mode)})
 	m.broadcast(web.Event{Kind: "sandbox", Text: string(tools.CurrentSandboxMode())})
 	m.broadcast(web.Event{Kind: "working_mode", Text: string(m.workingMode)})
@@ -1447,6 +1449,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case webSetModelMsg:
 		m.applyModelPin(msg.role) // 内部广播 routing
 		return m, nil
+
+	case webSetProviderMsg:
+		// 浏览器提供商下拉 → 与终端 /provider <名字> 完全同一条应用路径(写回 model.yaml + 热切)。
+		// applyProvider 内部经 hub.SetModels 广播新模型名与当前提供商名,前端下拉即时对齐。
+		return m, m.applyProvider(msg.name)
 
 	case webSetModeMsg:
 		m.applyMode(agent.AgentMode(msg.mode))
