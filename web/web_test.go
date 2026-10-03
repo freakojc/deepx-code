@@ -401,6 +401,85 @@ func TestControlEndpoints(t *testing.T) {
 	}
 }
 
+// TestProviderState 验证提供商切换链路:providers 列表与 Models.Provider 进快照、
+// SetModels 四参全量覆盖、/api/provider 端点触发 OnSetProvider 回调、/api/state 快照带全量字段。
+func TestProviderState(t *testing.T) {
+	h := NewHub("flash", "pro", "/tmp/ws", "zh")
+
+	// providers 列表:SetProviders → 快照;空列表能清空(下拉选项随存档增删刷新)。
+	h.SetProviders([]string{"deepseek", "openrouter", "mimo"})
+	if s := h.SnapshotCopy(); len(s.Providers) != 3 || s.Providers[0] != "deepseek" {
+		t.Fatalf("providers not in snapshot: %+v", s.Providers)
+	}
+	h.SetProviders(nil)
+	if s := h.SnapshotCopy(); len(s.Providers) != 0 {
+		t.Fatalf("providers should clear on empty set, got %+v", s.Providers)
+	}
+	h.SetProviders([]string{"deepseek"})
+
+	// models 事件带 provider → 快照 Models.Provider(与 flash/pro/role 同批更新)。
+	h.Broadcast(Event{Kind: "models", Flash: "f1", Pro: "p1", Provider: "openrouter", Role: "pro"})
+	s := h.SnapshotCopy()
+	if s.Models.Provider != "openrouter" || s.Models.Flash != "f1" || s.Models.ActiveRole != "pro" {
+		t.Fatalf("models event provider not applied: %+v", s.Models)
+	}
+
+	// SetModels 四参全量覆盖(含 provider)。
+	h.SetModels("f2", "p2", "flash", "deepseek")
+	s = h.SnapshotCopy()
+	if s.Models.Flash != "f2" || s.Models.Pro != "p2" || s.Models.ActiveRole != "flash" || s.Models.Provider != "deepseek" {
+		t.Fatalf("SetModels not applied: %+v", s.Models)
+	}
+
+	// /api/provider POST → OnSetProvider 回调拿到名字。
+	srv := NewServer(h)
+	got := make(chan string, 1)
+	srv.OnSetProvider = func(name string) { got <- name }
+	rawURL, err := srv.Listen("127.0.0.1", 0)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer srv.Close()
+	u, _ := url.Parse(rawURL)
+	base := "http://" + u.Host
+	token := u.Query().Get("t")
+
+	postJSON(t, base+"/api/provider?t="+token, map[string]any{"name": "openrouter"})
+	select {
+	case name := <-got:
+		if name != "openrouter" {
+			t.Fatalf("OnSetProvider got %q", name)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnSetProvider not called")
+	}
+
+	// 无 token → 403。
+	resp, err := http.Post(base+"/api/provider", "application/json", strings.NewReader(`{"name":"x"}`))
+	if err != nil {
+		t.Fatalf("post provider no-token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("no-token provider want 403, got %d", resp.StatusCode)
+	}
+
+	// /api/state 快照应带 providers 列表与 Models.Provider(浏览器刷新 / 重连后下拉能恢复)。
+	h.SetProviders([]string{"deepseek", "mimo"})
+	h.SetModels("f2", "p2", "flash", "deepseek")
+	resp2, err := http.Get(base + "/api/state?t=" + token)
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	var snap2 Snapshot
+	_ = json.NewDecoder(resp2.Body).Decode(&snap2)
+	resp2.Body.Close()
+	if len(snap2.Providers) != 2 || snap2.Providers[0] != "deepseek" || snap2.Models.Provider != "deepseek" {
+		t.Fatalf("state snapshot missing provider: providers=%+v models=%+v", snap2.Providers, snap2.Models)
+	}
+}
+
 func readAllString(resp *http.Response) (string, error) {
 	var b bytes.Buffer
 	_, err := b.ReadFrom(resp.Body)

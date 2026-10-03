@@ -140,6 +140,35 @@ func providerDisplay(p string) string {
 	return p
 }
 
+// currentProviderName 推断当前生效配置(model.yaml 的 flash/pro model)对应 provider.yaml 里的哪个供应商名。
+// 与 /provider 选择器定位光标用的是同一判据:flash/pro 两条 model id 全部相等才认。
+// 匹配不到(用户手改过 model.yaml 或从未存档)返回 ""。
+func currentProviderName(models agent.ModelConfig) string {
+	names, err := config.ProviderNames()
+	if err != nil {
+		return ""
+	}
+	for _, n := range names {
+		if cfg, ok, _ := config.LoadProvider(n); ok &&
+			cfg.Flash.Model == models.Flash.Model && cfg.Pro.Model == models.Pro.Model {
+			return n
+		}
+	}
+	return ""
+}
+
+// broadcastProviderState 把 provider.yaml 的存档列表与当前生效提供商名推给 web:
+// 提供商下拉的选项 + 选中项 + 右栏模型名/角色,一次对齐。启动、切换供应商、/config 保存后调用。
+func (m model) broadcastProviderState() {
+	if m.hub == nil {
+		return
+	}
+	if names, err := config.ProviderNames(); err == nil {
+		m.hub.SetProviders(names)
+	}
+	m.hub.SetModels(m.models.Flash.Model, m.models.Pro.Model, m.activeModelRole, currentProviderName(m.models))
+}
+
 // refreshSetupProviders 重建第一步的候选列表:
 //
 //	config.ProviderOptions(deepseek / mimo / kimi / qwen / 其它(自定义)=新建)
@@ -192,6 +221,7 @@ func (m *model) setupDeleteSelected() {
 	}
 	m.setupErr = ""
 	m.refreshSetupProviders()
+	m.broadcastProviderState() // 存档列表少了一项,浏览器提供商下拉同步(删的是当前在用的也不动 model.yaml)
 	m.appendChat("System", fmt.Sprintf(T("setup.deleted"), name))
 }
 
@@ -531,6 +561,8 @@ func (m *model) submitSetup() tea.Cmd {
 	// 对新配置的模型重探视觉能力(结果经 visionCapMsg 回灌当前会话 + 覆盖缓存)。
 	// 余额也重探:换了供应商/Key,旧值已无意义,先清空待新值回灌。
 	m.balance = ""
+	// 新建/改名存档后把提供商列表 + 当前提供商名推给 Web,下拉选项与选中项一次对齐。
+	m.broadcastProviderState()
 	cmds := visionProbeCmds(m.models)
 	if cmd := balanceProbeCmd(m.models); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -572,9 +604,9 @@ func (m *model) handleProviderCommand(input string) tea.Cmd {
 	// 裸 /provider → 弹选择器,光标默认停在与当前 model.yaml 匹配的供应商上(匹配不到停 0)。
 	m.providerNames = names
 	m.providerModalIdx = 0
+	cur := currentProviderName(m.models)
 	for i, n := range names {
-		if cfg, ok, _ := config.LoadProvider(n); ok &&
-			cfg.Flash.Model == m.models.Flash.Model && cfg.Pro.Model == m.models.Pro.Model {
+		if n == cur {
 			m.providerModalIdx = i
 			break
 		}
@@ -621,9 +653,9 @@ func (m *model) applyProvider(name string) tea.Cmd {
 	m.appendChat("System", fmt.Sprintf(T("provider.switched"), name, m.models.Flash.Model, m.models.Pro.Model))
 	m.refreshViewport()
 	// /provider 切供应商后同步 Web 面板模型名(Hub 快照的 Models 只在启动时设过一次,
-	// 不广播的话浏览器右栏仍显示旧模型)。
+	// 不广播的话浏览器右栏仍显示旧模型)。provider 直接带上刚切过去的名字,下拉选中项同步。
 	if m.hub != nil {
-		m.hub.SetModels(m.models.Flash.Model, m.models.Pro.Model, m.activeModelRole)
+		m.hub.SetModels(m.models.Flash.Model, m.models.Pro.Model, m.activeModelRole, name)
 	}
 	// 换供应商 → 余额变了,先清空待重探回灌。
 	m.balance = ""

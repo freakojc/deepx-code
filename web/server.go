@@ -42,6 +42,7 @@ type Server struct {
 	OnRenameSession  func(id, title string) // 重命名会话
 	OnDeleteSession  func(id string)    // 删除会话
 	OnSetModel       func(role string) // 路由 auto/flash/pro
+	OnSetProvider    func(name string) // 切换提供商(provider.yaml 存档名)
 	OnSetMode        func(mode string) // 权限模式 plan/auto/review
 	OnSetSandbox     func(mode string) // 沙箱 off/native/docker
 	OnSetWorkingMode func(mode string) // 工作模式 karpathy/openspec/superpowers
@@ -189,6 +190,7 @@ func (s *Server) Serve() error {
 	mux.HandleFunc("/api/session-rename", s.handleSessionRename)
 	mux.HandleFunc("/api/session-delete", s.handleSessionDelete)
 	mux.HandleFunc("/api/model", s.handleModel)
+	mux.HandleFunc("/api/provider", s.handleProvider)
 	mux.HandleFunc("/api/mode", s.handleMode)
 	mux.HandleFunc("/api/sandbox", s.handleSandbox)
 	mux.HandleFunc("/api/workingmode", s.handleWorkingMode)
@@ -688,6 +690,16 @@ func (s *Server) handleModel(w http.ResponseWriter, r *http.Request) {
 	s.postField(w, r, "role", func(role string) {
 		if s.OnSetModel != nil && role != "" {
 			s.OnSetModel(role)
+		}
+	})
+}
+
+// handleProvider 浏览器提供商下拉切换:POST {name} → OnSetProvider(name)。
+// name 必须是 provider.yaml 里已存档的供应商名;未知名由 TUI 侧 applyProvider 报 "查无此名"。
+func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
+	s.postField(w, r, "name", func(name string) {
+		if s.OnSetProvider != nil && name != "" {
+			s.OnSetProvider(name)
 		}
 	})
 }

@@ -68,6 +68,7 @@ func Run(models agent.ModelConfig, needsSetup bool, version string) error {
 		srv.OnRenameSession = func(id, title string) { p.Send(webRenameSessionMsg{id: id, title: title}) }
 		srv.OnDeleteSession = func(id string) { p.Send(webDeleteSessionMsg{id: id}) }
 		srv.OnSetModel = func(role string) { p.Send(webSetModelMsg{role: role}) }
+		srv.OnSetProvider = func(name string) { p.Send(webSetProviderMsg{name: name}) }
 		srv.OnSetMode = func(mode string) { p.Send(webSetModeMsg{mode: mode}) }
 		srv.OnSetSandbox = func(mode string) { p.Send(webSetSandboxMsg{mode: mode}) }
 		srv.OnSetWorkingMode = func(mode string) { p.Send(webSetWorkingModeMsg{mode: mode}) }

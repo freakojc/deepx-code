@@ -33,6 +33,9 @@ type ModelsInfo struct {
 	Flash      string `json:"flash"`
 	Pro        string `json:"pro"`
 	ActiveRole string `json:"activeRole"` // "flash" | "pro"
+	// Provider 是当前生效配置在 provider.yaml 里对应的供应商名(/provider 切过去的那一个)。
+	// "" = model.yaml 匹配不到任何存档(手改过 yaml),前端下拉显示未选中。
+	Provider string `json:"provider,omitempty"`
 }
 
 // ReviewInfo 待人工确认的工具调用(review 模式)。nil = 当前没有待确认。
@@ -70,6 +73,7 @@ type Snapshot struct {
 	// 控制态,与 TUI 对齐:路由 / 权限模式 / 沙箱 / 工作模式 / 代码图谱状态 + 会话列表。
 	Vendor      string        `json:"vendor"`      // 模型厂商(api host)
 	Routing     string        `json:"routing"`     // auto | flash | pro(模型路由 pin)
+	Providers   []string      `json:"providers"`   // provider.yaml 里已存档的供应商名(提供商下拉的选项)
 	Mode        string        `json:"mode"`        // plan | auto | review
 	Sandbox     string        `json:"sandbox"`     // off | native | docker
 	WorkingMode string        `json:"workingMode"` // karpathy | openspec | superpowers
@@ -141,13 +145,14 @@ func (h *Hub) Broadcast(ev Event) {
 
 // SetModels 全量更新 Hub 快照里的模型展示信息,并广播给所有已连接的浏览器。
 // /provider 切换供应商后调用,保证 Web 右栏的模型名与 CLI 一致。
-func (h *Hub) SetModels(flash, pro, activeRole string) {
+// provider 是当前生效配置在 provider.yaml 里对应的供应商名;"" 表示匹配不到存档。
+func (h *Hub) SetModels(flash, pro, activeRole, provider string) {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
-	h.snap.Models = ModelsInfo{Flash: flash, Pro: pro, ActiveRole: activeRole}
-	ev := Event{Kind: "models", Flash: flash, Pro: pro}
+	h.snap.Models = ModelsInfo{Flash: flash, Pro: pro, ActiveRole: activeRole, Provider: provider}
+	ev := Event{Kind: "models", Flash: flash, Pro: pro, Provider: provider}
 	if activeRole != "" {
 		ev.Role = activeRole
 	}
@@ -160,6 +165,15 @@ func (h *Hub) SetModels(flash, pro, activeRole string) {
 		}
 	}
 	h.mu.Unlock()
+}
+
+// SetProviders 全量更新可切换的供应商名列表(provider.yaml 存档)并广播,供提供商下拉渲染。
+// 列表为空时清空前端下拉(hub.apply 对空切片也能正确覆盖)。
+func (h *Hub) SetProviders(names []string) {
+	if h == nil {
+		return
+	}
+	h.Broadcast(Event{Kind: "providers", Providers: names})
 }
 
 // Subscribe 注册一个新客户端,返回其事件 channel、当前快照、以及注销函数。
@@ -195,6 +209,7 @@ func (h *Hub) copySnapshotLocked() Snapshot {
 	s.Step = append([]PlanNode(nil), h.snap.Step...)
 	s.ToolCalls = append([]ToolCallView(nil), h.snap.ToolCalls...)
 	s.Sessions = append([]SessionInfo(nil), h.snap.Sessions...)
+	s.Providers = append([]string(nil), h.snap.Providers...)
 	if h.snap.Usage != nil {
 		u := *h.snap.Usage
 		s.Usage = &u
@@ -304,6 +319,13 @@ func (h *Hub) apply(ev Event) Event {
 		if ev.Role != "" {
 			h.snap.Models.ActiveRole = ev.Role
 		}
+		if ev.Provider != "" {
+			h.snap.Models.Provider = ev.Provider
+		}
+
+	case "providers":
+		// 提供商下拉的选项列表,整份覆盖(TUI 侧每次增删存档 / 启动时重推)。
+		h.snap.Providers = append([]string(nil), ev.Providers...)
 
 	case "plan":
 		// createplan → 步骤;todo / 其它 → 计划。对齐 TUI 的 计划/步骤 两套。
