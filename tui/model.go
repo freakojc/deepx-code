@@ -504,7 +504,12 @@ type model struct {
 }
 
 // webInputMsg 是浏览器提交的输入,经 program.Send 注入,走和终端 Enter 完全相同的提交逻辑。
-type webInputMsg struct{ text string }
+// images 是浏览器已落盘的图片绝对路径(~/deepx/ocr/cache 下),提交前并入 attachedImagePaths
+// 并按其序号插入 [Image #N] 占位符(与 TUI 粘贴图片同链路)。
+type webInputMsg struct {
+	text   string
+	images []string
+}
 
 // webReviewMsg 是浏览器的 review 确认,经 program.Send 注入,复用终端同一个 ReviewCh(先到先得)。
 type webReviewMsg struct{ approve bool }
@@ -1393,8 +1398,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case webInputMsg:
 		// 浏览器提交的输入,走和终端 Enter 完全相同的提交逻辑。
+		// 带图时先把落盘路径并入 attachedImagePaths,并在文本尾部按序插入 [Image #N] 占位符 ——
+		// submitUserInput 的 reconcileAttachedImages 按占位符裁剪图片,文本空只发图也正确。
 		var cmd tea.Cmd
-		m, cmd = m.submitUserInput(msg.text)
+		if len(msg.images) > 0 {
+			base := len(m.attachedImagePaths)
+			m.attachedImagePaths = append(m.attachedImagePaths, msg.images...)
+			var b strings.Builder
+			b.WriteString(msg.text)
+			for i := 1; i <= len(msg.images); i++ {
+				b.WriteString(fmt.Sprintf(" [Image #%d] ", base+i))
+			}
+			m, cmd = m.submitUserInput(b.String())
+		} else {
+			m, cmd = m.submitUserInput(msg.text)
+		}
 		return m, cmd
 
 	case webReviewMsg:

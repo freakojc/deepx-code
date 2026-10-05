@@ -10,6 +10,10 @@
 </head>
 <body>
   <div id="app">
+    <!-- 整页拖图遮罩:拖拽文件悬停时提示释放位置(原生 dragenter/drop 监听驱动,见 app.js mounted) -->
+    <div v-if="dropOverlay" class="drop-overlay">
+      <div class="drop-overlay-inner">{{ t('drop.hint') }}</div>
+    </div>
     <header class="topbar">
       <div class="brand">deepx-code<span class="brand-sub">webui</span></div>
       <div class="conn" :class="connected ? 'on' : 'off'">
@@ -240,18 +244,29 @@
                 @mousedown.prevent="mentionPick(i, true)"
                 @mousemove="mention.idx = i">{{ f }}</li>
           </ul>
-          <textarea
-            v-model="input"
-            :placeholder="streaming ? t('placeholder.streaming') : t('placeholder.idle')"
-            @keydown="onKey"
-            @input="onInput"
-            @keyup="syncMention"
-            @click="syncMention"
-            @blur="mention.active = false"
-            rows="1"
-            ref="ta"></textarea>
+          <div class="composer-main">
+            <textarea
+              v-model="input"
+              :placeholder="streaming ? t('placeholder.streaming') : t('placeholder.idle')"
+              @keydown="onKey"
+              @input="onInput"
+              @keyup="syncMention"
+              @click="syncMention"
+              @blur="mention.active = false"
+              rows="1"
+              ref="ta"></textarea>
+            <!-- 已选附件:内嵌在输入框底部一行固定高度,每项显示简写名(悬停看全名/路径),可逐个移除 -->
+            <div v-if="attachedFiles.length" class="attached-row">
+              <span v-for="(f, i) in attachedFiles" :key="f.path" class="attached-chip" :class="{ file: f.kind !== 'image' }" :title="f.path">
+                <span class="attached-name">{{ shortName(f.name) }}</span>
+                <button type="button" class="attached-x" :title="t('attach.remove')" @click="removeFile(i)">×</button>
+              </span>
+            </div>
+          </div>
+          <button type="button" class="attach-btn" :title="t('attach.hint')" @click="pickFiles">{{ t('attach') }}</button>
           <button v-if="streaming" type="button" class="stop-btn" @click="interrupt">{{ t('stop') }}</button>
-          <button type="submit" :disabled="!input.trim()">{{ t('send') }}</button>
+          <button type="submit" :disabled="!input.trim() && !attachedFiles.length">{{ t('send') }}</button>
+          <input type="file" ref="fileInput" multiple class="hidden-input" @change="onFilesPicked">
         </form>
       </section>
 

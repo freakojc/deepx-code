@@ -19,6 +19,10 @@ const I18N = {
     'queued.title': '待发送(本轮结束后自动发出)',
     'queued.cancel': '取消发送',
     'queued.cancel_hint': '把全部待发送消息复制到剪贴板并取消(不影响正在运行的任务)',
+    'attach': '添加文件',
+    'attach.hint': '选择本地图片或文件发送给模型',
+    'attach.remove': '移除这个附件',
+    'drop.hint': '松开鼠标添加文件',
     'review.title': '需要确认',
     'review.approve': '批准',
     'review.reject': '拒绝',
@@ -114,6 +118,10 @@ const I18N = {
     'queued.title': 'Queued (sent automatically when this turn ends)',
     'queued.cancel': 'Cancel',
     'queued.cancel_hint': 'Copy all queued messages to clipboard and cancel (does not interrupt the running task)',
+    'attach': 'Add File',
+    'attach.hint': 'Pick a local image or file to send to the model',
+    'attach.remove': 'Remove this attachment',
+    'drop.hint': 'Release to add file(s)',
     'review.title': 'Confirmation needed',
     'review.approve': 'Approve',
     'review.reject': 'Reject',
@@ -221,6 +229,9 @@ createApp({
       askSel: [],       // [题][选项] 勾选态
       askCustom: [],    // [题] 「其他」的自由文本(issue #242)。非空即视为选中,不另设勾选位
       queued: [],       // 流式/压缩中排队待发送的消息原文(FIFO),展示在输入框上方(issue #161)
+      attachedFiles: [], // 已选待发送附件:{path(落盘绝对路径), name(原始文件名,仅展示), kind(image|file)}
+      dropOverlay: false, // 整页拖拽悬停提示遮罩(仅拖入文件时亮起)
+      dropDepth: 0,       // 拖拽进入/离开计数(子元素间 dragleave 会闪烁,用计数归零才关遮罩)
       // 活动状态行(对齐 TUI 输入框上方那条):状态 / 实时耗时 / 工具调用
       status: 'idle',   // idle | thinking | streaming | tool | error
       showThinking: false, // /thinking 偏好,由快照 / show_thinking 事件与 TUI 同步
@@ -483,17 +494,62 @@ createApp({
       });
     },
     async send() {
-      const text = this.input.trim();
-      if (!text) return;
+      const typed = this.input.trim();
+      // 图片走 images 通道(→ ChatMessage.ImagePaths → 视觉模型 base64 / 非视觉走 OCR);
+      // 非图片附件走路径通道 —— 绝对路径拼进文本,模型按需 Read(对齐 TUI 的 @提及/拖路径范式:只给路径不给内容)。
+      const imagePaths = this.attachedFiles.filter(f => f.kind === 'image').map(f => f.path);
+      const filePaths = this.attachedFiles.filter(f => f.kind !== 'image').map(f => f.path);
+      let text = typed;
+      if (filePaths.length) {
+        text += (text ? '\n\n' : '') + filePaths.map(p => `[附件] ${p}`).join('\n');
+      }
+      // 允许只发附件不打字(与 TUI 贴图不发字一致);两者皆空不发送。
+      if (!text && !imagePaths.length) return;
       this.input = '';
+      this.attachedFiles = [];
       this.mention.active = false;
       this.$nextTick(() => this.autoGrow()); // 发送后高度复位回单行
       this.scrollDown(true);                 // 自己发的消息:强制跟到底部
       await fetch('/api/input', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, images: imagePaths }),
       }).catch(() => {});
+    },
+    // === 附件添加:按钮选文件 / 整页拖拽(拖拽监听挂在 document 上,见 mounted) ===
+    pickFiles() { this.$refs.fileInput.click(); },
+    async onFilesPicked(e) {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      await this.uploadFiles(files);
+    },
+    // hasFiles 判断这次拖拽是否带文件:拖选中文本 / 页面元素时不亮遮罩、不拦截默认行为。
+    hasFiles(e) {
+      const dt = e.dataTransfer;
+      return !!(dt && ((dt.types && Array.prototype.includes.call(dt.types, 'Files')) || (dt.files && dt.files.length)));
+    },
+    // uploadFiles 逐个 POST /api/file:后端落盘到 ~/.deepx/ocr/cache 并按扩展名返回 kind(image/file)。
+    // 失败(超 10MB / 可执行类型被拒)toast 提示并跳过该文件,不让半截状态卡住整批。
+    async uploadFiles(files) {
+      for (const f of files) {
+        try {
+          const fd = new FormData();
+          fd.append('file', f);
+          const r = await fetch('/api/file', { method: 'POST', body: fd });
+          if (!r.ok) { this.showToast(`${this.t('attach')}: ${f.name} — HTTP ${r.status}`); continue; }
+          const j = await r.json();
+          if (j.path) this.attachedFiles.push({ path: j.path, name: f.name, kind: j.kind || 'file' });
+        } catch (err) {
+          this.showToast(`${this.t('attach')}: ${f.name} — ${err && err.message ? err.message : err}`);
+        }
+      }
+    },
+    removeFile(i) { this.attachedFiles.splice(i, 1); },
+    // shortName 简写文件名:去扩展名,超 8 字符截断加省略号(悬停 title 看完整路径)。
+    shortName(name) {
+      const dot = name.lastIndexOf('.');
+      const base = dot > 0 ? name.slice(0, dot) : name;
+      return base.length > 8 ? base.slice(0, 8) + '…' : base;
     },
     async review(approve) {
       await fetch('/api/review', {
@@ -982,7 +1038,44 @@ createApp({
     this.connect();
     // 点菜单以外的任何地方关闭"…"菜单(菜单按钮 / 菜单本身用 @click.stop 不会冒泡到这里)。
     document.addEventListener('click', () => { this.menuOpen = null; });
+    // 整页拖拽加文件:#app 是 Vue 挂载容器,写在它上面的 @dragover/@drop 不参与模板编译,
+    // 必须在 document 上挂原生监听(否则浏览器默认行为会直接打开拖入的文件)。
+    // dragover 必须 preventDefault,否则 drop 不会触发。
+    this._docDragOver = (e) => {
+      if (!this.hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    };
+    this._docDragEnter = (e) => {
+      if (!this.hasFiles(e)) return;
+      e.preventDefault();
+      this.dropDepth++;
+      this.dropOverlay = true;
+    };
+    this._docDragLeave = (e) => {
+      if (!this.hasFiles(e)) return;
+      this.dropDepth = Math.max(0, this.dropDepth - 1);
+      if (this.dropDepth === 0) this.dropOverlay = false;
+    };
+    this._docDrop = (e) => {
+      this.dropOverlay = false;
+      this.dropDepth = 0;
+      if (!this.hasFiles(e)) return;
+      e.preventDefault();
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      if (files.length) this.uploadFiles(files);
+    };
+    document.addEventListener('dragover', this._docDragOver);
+    document.addEventListener('dragenter', this._docDragEnter);
+    document.addEventListener('dragleave', this._docDragLeave);
+    document.addEventListener('drop', this._docDrop);
     // 状态行实时耗时:streaming 时每 250ms 刷新一次 nowTick 驱动重算。
     setInterval(() => { if (this.streaming) this.nowTick = Date.now(); }, 250);
+  },
+  unmounted() {
+    document.removeEventListener('dragover', this._docDragOver);
+    document.removeEventListener('dragenter', this._docDragEnter);
+    document.removeEventListener('dragleave', this._docDragLeave);
+    document.removeEventListener('drop', this._docDrop);
   },
 }).mount('#app');

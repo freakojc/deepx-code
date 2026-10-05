@@ -6,15 +6,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"deepx/mcp"
 	"deepx/skill"
+	"deepx/tools"
 )
 
 // Server 是本地 web dashboard 的 HTTP 服务。默认绑 127.0.0.1(仅本机),带随机 token 防未授权访问。
@@ -27,7 +31,7 @@ type Server struct {
 	srv   *http.Server
 
 	// 回调:浏览器提交输入 / review 确认时触发。由调用方注入。
-	OnInput     func(text string)
+	OnInput     func(text string, images []string) // 浏览器提交的输入 + 已落盘的图片路径(可为空)
 	OnReview    func(approve bool)
 	OnAskAnswer func(answer string) // AskUser 选择题:浏览器回传的答案 JSON
 	OnInterrupt func()              // 浏览器点"停止":中断当前执行(等价终端 Esc)
@@ -182,6 +186,7 @@ func (s *Server) Serve() error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/input", s.handleInput)
+	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/review", s.handleReview)
 	mux.HandleFunc("/api/ask-answer", s.handleAskAnswer)
 	mux.HandleFunc("/api/interrupt", s.handleInterrupt)
@@ -316,16 +321,102 @@ func (s *Server) handleInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Text string `json:"text"`
+		Text   string   `json:"text"`
+		Images []string `json:"images"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if s.OnInput != nil && body.Text != "" {
-		s.OnInput(body.Text)
+	// images 是前端已通过 /api/file 落盘到 ~/.deepx/ocr/cache 的图片路径;只发图不打字时
+	// Text 为空也照常提交(与 TUI 贴图不打字的行为一致)。非图片附件由前端拼进 Text(路径通道)。
+	if s.OnInput != nil && (body.Text != "" || len(body.Images) > 0) {
+		s.OnInput(body.Text, body.Images)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// webFileMaxBytes 是浏览器上传单个附件的大小上限:图片/文档都可能较大,10MB 足够覆盖
+// 截图 / 照片 / 常见 PDF,又不会让一个 HTTP body 把进程内存顶爆。
+const webFileMaxBytes = 10 << 20
+
+// webImageExts 是图片扩展名(按此判定附件走图片通道:视觉模型 base64 / 非视觉走 OCR)。
+var webImageExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true,
+}
+
+// webBlockedExts 是拒绝落盘的可执行 / 脚本扩展名:缓存目录下的文件虽不会被自动执行,但仍不该
+// 把明显的可执行体放进用户机器。文档 / 文本 / 源码(.js/.py/.go/...)一律放行 —— 它们是模型要读的内容。
+var webBlockedExts = map[string]bool{
+	".exe": true, ".com": true, ".scr": true, ".msi": true, ".dll": true, ".so": true,
+	".dylib": true, ".bat": true, ".cmd": true, ".ps1": true, ".vbs": true, ".vbe": true,
+	".wsf": true, ".jse": true, ".hta": true, ".cpl": true, ".reg": true, ".jar": true,
+}
+
+// handleFile 接收浏览器上传的附件(multipart form 字段 "file"),落盘到 ~/.deepx/ocr/cache
+// (与 TUI 粘贴图片共用,7 天由 SweepPasteCache 统一清理),返回落盘绝对路径 + 类型。
+//
+// kind 语义(前端据此决定附件形态):
+//   - "image":走图片通道 —— /api/input 的 images 字段 → ChatMessage.ImagePaths → base64 / OCR;
+//   - "file": 走路径通道 —— 前端把该绝对路径拼进消息文本,模型按需 Read(对齐 TUI 的 @提及/拖路径)。
+func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	if !s.authed(r) || r.Method != http.MethodPost {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if err := r.ParseMultipartForm(webFileMaxBytes); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	f, hdr, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file", http.StatusBadRequest)
+		return
+	}
+	defer f.Close()
+	ext := strings.ToLower(filepath.Ext(hdr.Filename))
+	if webBlockedExts[ext] {
+		http.Error(w, "executable uploads are not allowed", http.StatusUnsupportedMediaType)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(f, webFileMaxBytes+1))
+	if err != nil {
+		http.Error(w, "read error", http.StatusBadRequest)
+		return
+	}
+	if len(data) > webFileMaxBytes {
+		http.Error(w, "file too large (max 10MB)", http.StatusRequestEntityTooLarge)
+		return
+	}
+	dir := tools.PasteCacheDir()
+	if dir == "" {
+		http.Error(w, "home dir unavailable", http.StatusInternalServerError)
+		return
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		http.Error(w, "cache dir error", http.StatusInternalServerError)
+		return
+	}
+	// 命名沿用粘贴缓存的纳秒时间戳风格(web 没有 index,用随机后缀防撞);保留原扩展名
+	// (浏览器上传是原文件,不像粘贴那样转成 PNG)。
+	name := fmt.Sprintf("%s-%s%s", time.Now().Format("20060102-150405.000000000"), randomToken(), ext)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		http.Error(w, "write error", http.StatusInternalServerError)
+		return
+	}
+	kind := "file"
+	if webImageExts[ext] {
+		kind = "image"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"path":%s,"kind":%s}`, mustJSONString(path), mustJSONString(kind))
+}
+
+// mustJSONString 把字符串编码成 JSON 字符串字面量(用于拼响应体)。
+func mustJSONString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
