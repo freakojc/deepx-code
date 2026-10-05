@@ -160,6 +160,9 @@ body {
 }
 .composer:focus-within { border-color: var(--accent2); box-shadow: 0 0 0 3px rgba(124, 92, 255, .14); }
 
+/* 输入主体:textarea + 内嵌附件行,纵向排布(flex 弹性占满按钮左侧空间) */
+.composer-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
 /* @ 文件选择器:浮在输入卡片上方 */
 .mention-pop {
   position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 8px;
@@ -173,10 +176,40 @@ body {
 }
 .mention-pop li.sel { background: var(--accent2); color: #fff; }
 .composer textarea {
-  flex: 1; resize: none; background: transparent; color: var(--fg);
+  flex: none; width: 100%; resize: none; background: transparent; color: var(--fg);
   border: none; padding: 6px 0; font: inherit; line-height: 1.5; max-height: 200px; min-height: 26px;
 }
 .composer textarea:focus { outline: none; }
+/* 附件行:固定在输入框底部独立一行(高度固定、不随文字行变),chips 单行横向滚动不换行 */
+.attached-row {
+  display: flex; flex-wrap: nowrap; gap: 5px;
+  height: 22px; padding: 0 0 2px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+}
+.attached-row::-webkit-scrollbar { display: none; }
+.attached-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  max-width: 150px; padding: 1px 6px 1px 9px;
+  background: var(--bg2, var(--bg)); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 11px; color: var(--dim); cursor: default;
+}
+.attached-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 非图片附件(文档/文本)用虚线边框区分,仍走同一样式卡槽 */
+.attached-chip.file { border-style: dashed; }
+.attached-x {
+  flex: none; font: inherit; font-size: 12px; line-height: 1; padding: 0 3px;
+  background: none; border: none; border-radius: 4px; color: var(--dim); cursor: pointer;
+}
+.attached-x:hover { color: var(--fg); background: rgba(124, 92, 255, .12); }
+/* 「添加文件」按钮:淡边框、悬停描强调色(对齐全局 hover 边框风格),纯文字无 emoji */
+.attach-btn {
+  flex-shrink: 0; font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 11px; cursor: pointer;
+  background: var(--bg2, var(--bg)); border: 1px solid var(--border); color: var(--fg);
+  transition: border-color .12s, filter .12s, transform .06s;
+}
+.attach-btn:hover { border-color: var(--accent2); filter: brightness(1.06); }
+.attach-btn:active { transform: translateY(1px); }
+.hidden-input { display: none; }
 .composer button {
   flex-shrink: 0; background: var(--accent2); color: #fff; border: none; border-radius: 11px;
   padding: 8px 18px; font-weight: 600; cursor: pointer; transition: filter .12s, transform .06s;
@@ -185,6 +218,19 @@ body {
 .composer button:active:not(:disabled) { transform: translateY(1px); }
 .composer button:disabled { opacity: .35; cursor: not-allowed; }
 .composer button.stop-btn { background: var(--red); color: #ffffff; }
+
+/* 整页拖图遮罩:拖拽文件悬停时全屏暗化 + 居中提示"松开添加" */
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 14, 30, .45); backdrop-filter: blur(2px);
+  pointer-events: none; /* 只提示,不拦截任何点击/键盘 */
+}
+.drop-overlay-inner {
+  padding: 18px 32px; border-radius: 16px;
+  background: var(--bg); border: 2px dashed var(--accent2); color: var(--fg);
+  font-size: 14px; font-weight: 600;
+}
 
 /* workspace 路径(走普通 section 标题,这里只管路径行) */
 .ws-path { font-size: 12px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

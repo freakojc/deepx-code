@@ -5,13 +5,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"deepx/agent"
+	"deepx/tools"
 )
 
 // TestHubApply 验证 hub reducer:user→token 开 assistant 气泡,tool_call/result 配对,plan/usage 更新。
@@ -134,7 +139,7 @@ func TestServerAuthAndCallbacks(t *testing.T) {
 	gotReview := make(chan bool, 1)
 	gotAsk := make(chan string, 1)
 	gotInterrupt := make(chan struct{}, 1)
-	srv.OnInput = func(s string) { gotInput <- s }
+	srv.OnInput = func(s string, _ []string) { gotInput <- s }
 	srv.OnReview = func(b bool) { gotReview <- b }
 	srv.OnAskAnswer = func(s string) { gotAsk <- s }
 	srv.OnInterrupt = func() { gotInterrupt <- struct{}{} }
@@ -417,5 +422,124 @@ func postJSON(t *testing.T, url string, body map[string]any) {
 	resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		t.Fatalf("post %s status %d", url, resp.StatusCode)
+	}
+}
+
+// tinyPNG 是一张 1x1 合法 PNG,用于 /api/file 上传测试。
+var tinyPNG = []byte{
+	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+	0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+	0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
+	0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+	0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+	0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+	0x42, 0x60, 0x82,
+}
+
+// uploadFile 以 multipart 表单把 payload 作为 "file" 字段 POST 到 endpoint,返回状态码 + body。
+func uploadFile(t *testing.T, endpoint, filename string, payload []byte) (int, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	resp, err := http.Post(endpoint, w.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatalf("upload %s: %v", filename, err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode, string(body)
+}
+
+// TestFileUploadAndInput 覆盖:/api/file 上传附件落盘到粘贴缓存目录并按类型返回 kind(image/file)、
+// 可执行文件拒绝、无 token 403、/api/input 带 images 时 OnInput 回调收到文本 + 图片路径。
+func TestFileUploadAndInput(t *testing.T) {
+	h := NewHub("flash", "pro", "/tmp/ws", "zh")
+	srv := NewServer(h)
+	gotInput := make(chan [2]string, 2)
+	srv.OnInput = func(text string, images []string) { gotInput <- [2]string{text, strings.Join(images, ",")} }
+
+	rawURL, err := srv.Listen("127.0.0.1", 0)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer srv.Close()
+	u, _ := url.Parse(rawURL)
+	base := "http://" + u.Host
+	token := u.Query().Get("t")
+	cacheDir := tools.PasteCacheDir()
+
+	type fileResp struct {
+		Path string `json:"path"`
+		Kind string `json:"kind"`
+	}
+
+	// 1) 图片 → 200 + kind=image + path 落在缓存目录内、文件确实存在。
+	status, body := uploadFile(t, base+"/api/file?t="+token, "shot.png", tinyPNG)
+	if status != http.StatusOK {
+		t.Fatalf("upload png want 200, got %d: %s", status, body)
+	}
+	var img fileResp
+	if err := json.Unmarshal([]byte(body), &img); err != nil || img.Path == "" {
+		t.Fatalf("upload response missing path: %s", body)
+	}
+	if img.Kind != "image" {
+		t.Fatalf("png should be kind=image, got %q", img.Kind)
+	}
+	if !strings.HasPrefix(filepath.Clean(img.Path), filepath.Clean(cacheDir)+string(filepath.Separator)) {
+		t.Fatalf("path should be under paste cache %q, got %q", cacheDir, img.Path)
+	}
+	if _, err := os.Stat(img.Path); err != nil {
+		t.Fatalf("uploaded file should exist on disk: %v", err)
+	}
+	defer os.Remove(img.Path) // 清理测试残留(不污染用户缓存目录)
+
+	// 2) 文本文件 → 200 + kind=file(走路径通道,不走图片通道)。
+	status, body = uploadFile(t, base+"/api/file?t="+token, "notes.txt", []byte("hello deepx"))
+	if status != http.StatusOK {
+		t.Fatalf("upload txt want 200, got %d: %s", status, body)
+	}
+	var doc fileResp
+	if err := json.Unmarshal([]byte(body), &doc); err != nil || doc.Path == "" {
+		t.Fatalf("txt upload response missing path: %s", body)
+	}
+	if doc.Kind != "file" {
+		t.Fatalf("txt should be kind=file, got %q", doc.Kind)
+	}
+	if _, err := os.Stat(doc.Path); err != nil {
+		t.Fatalf("uploaded txt should exist on disk: %v", err)
+	}
+	defer os.Remove(doc.Path)
+
+	// 3) 可执行扩展名 → 415 拒绝。
+	if status, _ := uploadFile(t, base+"/api/file?t="+token, "evil.exe", []byte("MZ")); status != http.StatusUnsupportedMediaType {
+		t.Fatalf("exe upload want 415, got %d", status)
+	}
+
+	// 4) 无 token → 403。
+	if status, _ := uploadFile(t, base+"/api/file", "shot.png", tinyPNG); status != http.StatusForbidden {
+		t.Fatalf("no-token upload want 403, got %d", status)
+	}
+
+	// 5) /api/input 带 images → OnInput 收到文本 + 路径。
+	postJSON(t, base+"/api/input?t="+token, map[string]any{"text": "看图", "images": []string{img.Path}})
+	if got := <-gotInput; got[0] != "看图" || !strings.Contains(got[1], img.Path) {
+		t.Fatalf("OnInput got %v", got)
+	}
+
+	// 6) 只发附件不打字 → OnInput 也要触发(与 TUI 贴图不发字一致)。
+	postJSON(t, base+"/api/input?t="+token, map[string]any{"text": "", "images": []string{img.Path}})
+	if got := <-gotInput; got[0] != "" || !strings.Contains(got[1], img.Path) {
+		t.Fatalf("attachment-only input got %v", got)
 	}
 }
