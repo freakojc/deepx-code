@@ -73,6 +73,12 @@ type ModelEntry struct {
 	// Vision 表示该模型是否支持图片输入(由启动探测的缓存填入,见 tui)。决定带图消息发请求时
 	// 渲染成 base64 image_url(true)还是路径文本走 OCR(false)。
 	Vision bool
+	// OcrMode 用户对 OCR 模式的强制选择(全局设置,由 tui 填入):
+	//   - "" / "auto":维持 Vision 探测结果;
+	//   - "on":强制走内置 OCR(Vision 按 false 用,渲染路径+OCR、不拦 OCR 调用);
+	//   - "off":强制走模型视觉(Vision 按 true 用,渲染 base64;模型若真不支持会被端点拒,
+	//     此时不回退降级、直接报可读错误 —— 见 StartStream 里 isImageInputUnsupported 分支)。
+	OcrMode string
 }
 
 // ModelConfig 双模型配置。Flash 处理简单/查询型任务,Pro 处理复杂/规划型任务。
@@ -784,7 +790,7 @@ func StartStream(
 			// 只渲染发出去的副本,convo 规范形态(只存路径)不变。
 			// 渲染后的副本才是真正发出的输入 —— max_tokens 夹取按它估算(渲染会追加 OCR 文本等,
 			// 比规范 convo 大;按规范估会低估输入、夹不住,仍可能爆窗)。
-			rendered := renderConvoImages(renderWorkingMode(convo, workingMode), currentEntry.Vision)
+			rendered := renderConvoImages(renderWorkingMode(convo, workingMode), currentEntry.Vision, currentEntry.OcrMode == "on")
 			// 输入把输出预算挤没了:再发也只能吐几个 token 就停,表现为"一执行就自己停下来、
 			// 工具怎么调都失败"。这是压缩没能把上下文降下来的下游症状,而夹取本身是静默的 ——
 			// 出声一次,把症状和真因接上,别让用户对着"莫名其妙停住"干瞪眼(issue #232)。
@@ -803,10 +809,13 @@ func StartStream(
 			// 自愈兜底:被端点以"不支持图片输入"拒掉(无论 base64 是探测误判发的、还是历史里混进来的)→
 			// 把该模型降级为无视觉(本轮后续也生效),用"剥图"渲染重发一次,并通知 TUI 纠正缓存。
 			// 不限定 currentEntry.Vision —— base64 可能从别处混入,撞到就无条件回退。用户看不到这个 404。
-			if err != nil && isImageInputUnsupported(err) {
+			// OcrMode=off 时**抑制本自愈**:那是用户主动强制"走模型视觉",降级会静默违背其意图,
+			// 且会把探测缓存写成 false(用户下次切回 auto 就被误判)。off 撞拒直接走下方报错分支。
+			if err != nil && isImageInputUnsupported(err) && currentEntry.OcrMode != "off" {
 				currentEntry.Vision = false
 				ch <- VisionUnsupportedMsg{Model: currentEntry.Model, BaseURL: currentEntry.BaseURL}
-				rendered := renderConvoImages(renderWorkingMode(convo, workingMode), false)
+				// forceOCR 跟随 OcrMode:on 模式下落到"剥图重发"也用 forced 提醒语(不谎称非视觉)。
+				rendered := renderConvoImages(renderWorkingMode(convo, workingMode), false, currentEntry.OcrMode == "on")
 				assistantContent, reasoning, toolCalls, finishReason, usage, err = streamOnce(
 					ctx,
 					currentEntry.APIKey, currentEntry.BaseURL, currentEntry.Model,
@@ -820,6 +829,10 @@ func StartStream(
 				if errors.Is(err, context.Canceled) {
 					return
 				}
+				// OcrMode=off 且端点拒收图片:自愈已在上面被抑制(用户强制走模型视觉),这里把
+				// 供应商的原文(如 MiMo 的 "No endpoints found that support image input")包成
+				// 可读中文,并给出切换指引 —— 用户需要知道这是 OCR 模式导致的,而不是网络故障。
+				err = ocrOffError(currentEntry.OcrMode, currentEntry.Model, err)
 				ch <- StreamErrMsg{err}
 				return
 			}

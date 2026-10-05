@@ -77,6 +77,7 @@ type Snapshot struct {
 	Mode        string        `json:"mode"`        // plan | auto | review
 	Sandbox     string        `json:"sandbox"`     // off | native | docker
 	WorkingMode string        `json:"workingMode"` // karpathy | openspec | superpowers
+	Ocr         string        `json:"ocr"`         // auto | on | off(OCR 模式强制选择)
 	CodeGraph   string        `json:"codegraph"`   // 代码图谱状态 token
 	Balance     string        `json:"balance"`     // 账户剩余余额展示串(如 "¥110.00");"" 未探到,"-" 不支持
 	Sessions    []SessionInfo `json:"sessions"`
@@ -117,6 +118,7 @@ func NewHub(flashModel, proModel, workspace, lang string) *Hub {
 			Mode:        "review",
 			Sandbox:     "native",
 			WorkingMode: "karpathy",
+			Ocr:         "auto",
 		},
 		openAssistant: -1,
 		openThinking:  -1,
@@ -413,6 +415,11 @@ func (h *Hub) apply(ev Event) Event {
 	case "working_mode":
 		if ev.Text != "" {
 			h.snap.WorkingMode = ev.Text
+		}
+
+	case "ocr":
+		if ev.Text != "" {
+			h.snap.Ocr = ev.Text
 		}
 
 	case "codegraph":

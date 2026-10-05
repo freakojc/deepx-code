@@ -47,6 +47,21 @@ func distinctModelEntries(models agent.ModelConfig) []agent.ModelEntry {
 	return out
 }
 
+// visionFor 按用户 OCR 设置算出该 entry 发请求时用不用 base64 内联(提交时替代裸读 visionByModel)。
+//   - auto:维持探测值(visionByModel);
+//   - on:恒 false —— 强制内置 OCR,即使模型支持视觉也不发 base64;
+//   - off:恒 true —— 强制模型视觉,即使探测判成不支持也发 base64(撞拒由端点裁决,见 agent.ocrOffError)。
+func (m *model) visionFor(e agent.ModelEntry) bool {
+	switch m.ocrMode {
+	case "on":
+		return false
+	case "off":
+		return true
+	default:
+		return m.visionByModel[modelCapKey(e)]
+	}
+}
+
 // loadVisionCaps 从缓存读出各模型上次探到的视觉能力,作为当前会话的初值(探针返回前先用)。
 // 取值缺省即 false → 自然降级走 OCR。
 func loadVisionCaps(models agent.ModelConfig) map[string]bool {

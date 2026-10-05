@@ -213,6 +213,38 @@ var translations = map[string]map[Lang]string{
 		LangZH: "未知工作模式:%s(可选 kp/karpathy、openspec/spec、sp/superpowers)",
 		LangEN: "Unknown working mode: %s (choose kp/karpathy, openspec/spec, sp/superpowers)",
 	},
+	"cmd.ocr.desc": {
+		LangZH: "OCR模式:auto(按模型视觉能力)/ on(强制内置 OCR)/ off(强制模型视觉)",
+		LangEN: "OCR mode: auto (per model vision) / on (force built-in OCR) / off (force model vision)",
+	},
+	"ocr.title": {
+		LangZH: "选择 OCR 模式",
+		LangEN: "Choose OCR Mode",
+	},
+	"ocr.opt.auto": {
+		LangZH: "auto — 按模型视觉能力(默认)",
+		LangEN: "auto — per model vision (default)",
+	},
+	"ocr.opt.on": {
+		LangZH: "on    — 强制内置 OCR(本地)",
+		LangEN: "on    — force built-in OCR (local)",
+	},
+	"ocr.opt.off": {
+		LangZH: "off   — 强制模型视觉(直接看图)",
+		LangEN: "off   — force model vision (direct)",
+	},
+	"ocr.footer": {
+		LangZH: "↑/↓ 选择 · Enter 应用 · Esc 取消",
+		LangEN: "↑/↓ choose · Enter apply · Esc cancel",
+	},
+	"ocr.switched": {
+		LangZH: "已切到 OCR 模式:%s(auto=按模型视觉能力;on=强制内置 OCR;off=强制模型视觉)",
+		LangEN: "Switched to OCR mode: %s (auto=per vision; on=built-in OCR; off=model vision)",
+	},
+	"ocr.unknown": {
+		LangZH: "未知 OCR 模式:%s(可选 auto、on、off)",
+		LangEN: "Unknown OCR mode: %s (choose auto, on, off)",
+	},
 	"sandbox.title": {
 		LangZH: "选择沙箱模式",
 		LangEN: "Choose Sandbox Mode",
@@ -518,6 +550,7 @@ var translations = map[string]map[Lang]string{
 	"panel.codegraph": {LangZH: "代码图谱", LangEN: "CodeGraph"},
 	"panel.sandbox":   {LangZH: "沙箱", LangEN: "Sandbox"},
 	"panel.workmode":  {LangZH: "工作模式", LangEN: "Working mode"},
+	"panel.ocr":       {LangZH: "OCR模式", LangEN: "OCR Mode"},
 	"panel.topic":     {LangZH: "会话主题", LangEN: "Topic"},
 	"panel.todo":      {LangZH: "待办", LangEN: "Todo"}, // Todo 工具:主 agent 顺序清单
 	"panel.plan":      {LangZH: "计划", LangEN: "Plan"}, // CreatePlan:并发子 agent DAG
@@ -528,6 +561,7 @@ var translations = map[string]map[Lang]string{
 	"panel.label.cache":    {LangZH: "缓存", LangEN: "Cache"},
 	"panel.label.sbmode":   {LangZH: "隔离", LangEN: "Isolation"},
 	"panel.label.wmode":    {LangZH: "方法", LangEN: "Method"},
+	"panel.label.ocrmode":  {LangZH: "方式", LangEN: "Mode"},
 	"panel.label.endpoint": {LangZH: "接口", LangEN: "Endpoint"},
 	"panel.label.balance":  {LangZH: "余额", LangEN: "Balance"},
 	"panel.topic.none":     {LangZH: "(尚未识别)", LangEN: "(not identified yet)"},

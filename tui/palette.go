@@ -43,6 +43,7 @@ func slashCommands() []struct{ name, desc string } {
 		{"/web-config", T("cmd.web-config.desc")},
 		{"/sandbox", T("cmd.sandbox.desc")},
 		{"/working-mode", T("cmd.workingmode.desc")},
+		{"/ocr", T("cmd.ocr.desc")},
 		{"/undo", T("cmd.undo.desc")},
 		{"/router-list-pro", T("cmd.routerlistpro.desc")},
 		{"/router-list-flash", T("cmd.routerlistflash.desc")},

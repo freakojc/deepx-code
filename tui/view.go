@@ -372,6 +372,9 @@ func (m model) View() tea.View {
 	if m.showSandboxModal {
 		mainUI = overlayCentered(mainUI, m.sandboxModalBlock(), m.width, m.height)
 	}
+	if m.showOcrModal {
+		mainUI = overlayCentered(mainUI, m.ocrModalBlock(), m.width, m.height)
+	}
 	if m.showProviderModal {
 		mainUI = overlayCentered(mainUI, m.providerModalBlock(), m.width, m.height)
 	}
@@ -405,7 +408,7 @@ func (m model) View() tea.View {
 	// 其余终端恒 false —— 光标常驻,由终端按 DECSCUSR 的 blink 位自己闪。
 	// 别为了闪烁再去切 Cursor 的有无:那会让 bubbletea 每拍重发 DECSCUSR,在 CSI 解析不健全的
 	// 终端上把序列末尾的 q 打印到屏幕上(issue #167,详见 model.go 的 appSideCursorBlink)。
-	if !m.showSetup && !m.showLangModal && !m.showWorkingModeModal && !m.showSandboxModal && !m.showProviderModal && !m.showMcpAdd && !m.showWebConfig && !m.showMcpDelete && !m.showSkillAdd && !m.showSkillDelete && !m.showSessionList && !m.reviewPending && !m.askPending && !m.cursorBlinkOff {
+	if !m.showSetup && !m.showLangModal && !m.showWorkingModeModal && !m.showSandboxModal && !m.showOcrModal && !m.showProviderModal && !m.showMcpAdd && !m.showWebConfig && !m.showMcpDelete && !m.showSkillAdd && !m.showSkillDelete && !m.showSessionList && !m.reviewPending && !m.askPending && !m.cursorBlinkOff {
 		if c := m.input.Cursor(); c != nil {
 			c.Position.X += inputGutterWidth
 			c.Position.Y += bodyH + queuedH + inputTopPad
@@ -781,6 +784,36 @@ func (m model) sandboxModalBlock() string {
 		Render(content)
 }
 
+// ocrModalBlock 渲染 /ocr 选择弹窗。三项 auto/on/off(见 ocrModeOrder),ocrModalIdx 是当前光标。
+func (m model) ocrModalBlock() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(highlightColor).Render(T("ocr.title"))
+
+	options := []string{T("ocr.opt.auto"), T("ocr.opt.on"), T("ocr.opt.off")}
+	rows := make([]string, 0, len(options))
+	for i, opt := range options {
+		marker := "  "
+		style := lipgloss.NewStyle().Foreground(softFgColor)
+		if i == m.ocrModalIdx {
+			marker = "▸ "
+			style = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Background(lipgloss.Color("236"))
+		}
+		rows = append(rows, style.Render(marker+opt))
+	}
+
+	footer := lipgloss.NewStyle().Foreground(subtleColor).Render(T("ocr.footer"))
+	parts := []string{title, ""}
+	parts = append(parts, rows...)
+	parts = append(parts, "", footer)
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(highlightColor).
+		Padding(1, 2).
+		Width(42).
+		Render(content)
+}
+
 // modelModalBlock 渲染 /model 选择弹窗。三项:auto / flash / pro,modelModalIdx 是当前光标。
 func (m model) modelModalBlock() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(highlightColor).Render(T("model.modal.title"))
@@ -986,6 +1019,10 @@ func (m model) rightPanelView() string {
 	// 工作模式:kp / openspec / sp。
 	rows = append(rows, section("🧭 "+T("panel.workmode"), []string{
 		label(T("panel.label.wmode")) + " " + string(m.workingMode),
+	})...)
+	// OCR 模式:auto(按模型视觉能力) / on(强制内置 OCR) / off(强制模型视觉)。
+	rows = append(rows, section("🔍 "+T("panel.ocr"), []string{
+		label(T("panel.label.ocrmode")) + " " + m.ocrMode,
 	})...)
 	// 规划进度:始终显示(无规划时 0/0)。完整 plan 树在 chat 区展示,右栏只放摘要。
 	// 待办(Todo)= Todo 工具(主 agent 顺序清单);计划(Plan)= CreatePlan(并发子 agent DAG)。
