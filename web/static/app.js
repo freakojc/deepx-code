@@ -86,6 +86,7 @@ const I18N = {
     'confirm.ok': '确定',
     'confirm.cancel': '取消',
     'panel.routing': '模型路由',
+    'panel.ocr': 'OCR模式',
     'panel.mode': '权限模式',
     'panel.sandbox': '沙箱',
     'panel.workingmode': '工作模式',
@@ -177,6 +178,7 @@ const I18N = {
     'confirm.ok': 'Confirm',
     'confirm.cancel': 'Cancel',
     'panel.routing': 'Routing',
+    'panel.ocr': 'OCR Mode',
     'panel.mode': 'Permission',
     'panel.sandbox': 'Sandbox',
     'panel.workingmode': 'Working Mode',
@@ -195,6 +197,7 @@ const ROUTING_OPTIONS = ['auto', 'flash', 'pro'];
 const MODE_OPTIONS = ['plan', 'auto', 'review'];
 const SANDBOX_OPTIONS = ['off', 'native', 'docker'];
 const WORKING_MODE_OPTIONS = ['karpathy', 'openspec', 'superpowers'];
+const OCR_OPTIONS = ['auto', 'on', 'off'];
 
 createApp({
   data() {
@@ -237,6 +240,7 @@ createApp({
       mode: 'review',
       sandbox: 'native',
       workingMode: 'karpathy',
+      ocr: 'auto',
       codegraph: '',
       balance: '',     // 账户剩余余额展示串(¥110.00);"" 不显示,"-" 不支持
       sessions: [],
@@ -248,6 +252,7 @@ createApp({
       modeOptions: MODE_OPTIONS,
       sandboxOptions: SANDBOX_OPTIONS,
       workingModeOptions: WORKING_MODE_OPTIONS,
+      ocrOptions: OCR_OPTIONS,
       // @ 文件提及选择器
       mention: { active: false, idx: 0, query: '', start: 0, end: 0, hidden: false },
       mentionFiles: [],       // /api/files 拉到的工作区文件列表(懒加载、缓存)
@@ -705,6 +710,7 @@ createApp({
       if (s.mode) this.mode = s.mode;
       if (s.sandbox) this.sandbox = s.sandbox;
       if (s.workingMode) this.workingMode = s.workingMode;
+      if (s.ocr) this.ocr = s.ocr;
       this.codegraph = s.codegraph || '';
       this.balance = s.balance || '';
       this.showThinking = !!s.showThinking;
@@ -870,6 +876,9 @@ createApp({
         case 'working_mode':
           if (ev.text) this.workingMode = ev.text;
           break;
+        case 'ocr':
+          if (ev.text) this.ocr = ev.text;
+          break;
         case 'codegraph':
           if (ev.text) this.codegraph = ev.text;
           break;
@@ -937,6 +946,7 @@ createApp({
     setMode(m) { this.post('/api/mode', { mode: m }); },
     setSandbox(m) { this.post('/api/sandbox', { mode: m }); },
     setWorkingMode(m) { this.post('/api/workingmode', { mode: m }); },
+    setOcr(mode) { this.post('/api/ocr', { mode }); },
 
     connect() {
       const es = new EventSource('/api/events');

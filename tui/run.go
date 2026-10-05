@@ -71,6 +71,7 @@ func Run(models agent.ModelConfig, needsSetup bool, version string) error {
 		srv.OnSetMode = func(mode string) { p.Send(webSetModeMsg{mode: mode}) }
 		srv.OnSetSandbox = func(mode string) { p.Send(webSetSandboxMsg{mode: mode}) }
 		srv.OnSetWorkingMode = func(mode string) { p.Send(webSetWorkingModeMsg{mode: mode}) }
+		srv.OnSetOcr = func(mode string) { p.Send(webSetOcrMsg{mode: mode}) }
 		srv.OnSetLang = func(lang string) { p.Send(webSetLangMsg{lang: lang}) }
 		go func() { _ = srv.Serve() }()
 		defer srv.Close()

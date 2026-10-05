@@ -297,6 +297,7 @@ func TestControlEndpoints(t *testing.T) {
 	gotMode := make(chan string, 1)
 	gotSandbox := make(chan string, 1)
 	gotWM := make(chan string, 1)
+	gotOcr := make(chan string, 1)
 	gotLang := make(chan string, 1)
 	srv.OnSetLang = func(l string) { gotLang <- l }
 	srv.OnNewSession = func() { gotNew <- struct{}{} }
@@ -307,6 +308,7 @@ func TestControlEndpoints(t *testing.T) {
 	srv.OnSetMode = func(m string) { gotMode <- m }
 	srv.OnSetSandbox = func(m string) { gotSandbox <- m }
 	srv.OnSetWorkingMode = func(m string) { gotWM <- m }
+	srv.OnSetOcr = func(m string) { gotOcr <- m }
 
 	rawURL, err := srv.Listen("127.0.0.1", 0)
 	if err != nil {
@@ -360,6 +362,10 @@ func TestControlEndpoints(t *testing.T) {
 	if got := <-gotWM; got != "openspec" {
 		t.Fatalf("OnSetWorkingMode got %q", got)
 	}
+	postJSON(t, base+"/api/ocr?t="+token, map[string]any{"mode": "on"})
+	if got := <-gotOcr; got != "on" {
+		t.Fatalf("OnSetOcr got %q", got)
+	}
 	postJSON(t, base+"/api/lang?t="+token, map[string]any{"lang": "en"})
 	if got := <-gotLang; got != "en" {
 		t.Fatalf("OnSetLang got %q", got)
@@ -371,9 +377,10 @@ func TestControlEndpoints(t *testing.T) {
 	h.Broadcast(Event{Kind: "mode", Text: "plan"})
 	h.Broadcast(Event{Kind: "sandbox", Text: "off"})
 	h.Broadcast(Event{Kind: "working_mode", Text: "superpowers"})
+	h.Broadcast(Event{Kind: "ocr", Text: "on"})
 	h.Broadcast(Event{Kind: "sessions", Sessions: []SessionInfo{{ID: "a", Title: "T", Active: true}}})
 	s := h.SnapshotCopy()
-	if s.Vendor != "api.deepseek.com" || s.Routing != "flash" || s.Mode != "plan" || s.Sandbox != "off" || s.WorkingMode != "superpowers" {
+	if s.Vendor != "api.deepseek.com" || s.Routing != "flash" || s.Mode != "plan" || s.Sandbox != "off" || s.WorkingMode != "superpowers" || s.Ocr != "on" {
 		t.Fatalf("control state not in snapshot: %+v", s)
 	}
 

@@ -46,6 +46,10 @@ type meta struct {
 	// SandboxDockerImage 记忆 docker 沙箱用的镜像(/sandbox docker <image>)。空 = ubuntu:24.04。
 	SandboxDockerImage string `json:"sandbox_docker_image,omitempty"`
 
+	// OcrMode 记忆用户对 OCR 模式的强制选择(/ocr 切换):"auto"(默认,按各模型视觉探测结果)/
+	// "on"(强制内置 OCR)/ "off"(强制模型视觉)。全局级,跨会话与 web 端共享。
+	OcrMode string `json:"ocr_mode,omitempty"`
+
 	// 本地 web dashboard 配置(全局)。从前在 model.yaml,现统一收口到这里。
 	WebDisabled bool   `json:"web_disabled,omitempty"` // 默认开启,设 true 才关闭(零值=开,符合 omitempty)
 	WebHost     string `json:"web_host,omitempty"`     // 绑定地址,空=127.0.0.1 仅本机;0.0.0.0=局域网可访问

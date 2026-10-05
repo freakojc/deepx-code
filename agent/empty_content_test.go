@@ -48,10 +48,14 @@ func TestRenderImages_NeverEmptyContent(t *testing.T) {
 		ImagePaths: []string{"/definitely/not/there.png"},
 	}
 	for _, vision := range []bool{true, false} {
-		out := renderConvoImages([]ChatMessage{imageOnly}, vision)[0]
+		out := renderConvoImages([]ChatMessage{imageOnly}, vision, false)[0]
 		if strings.TrimSpace(out.Content) == "" && len(out.ContentParts) == 0 {
 			t.Errorf("vision=%v:渲染出了空内容的 user 消息 → 会被 API 400 拒绝", vision)
 		}
+	}
+	// OcrMode=on 的强制 OCR 渲染路径(force=true)同样不能产出空内容。
+	if out := renderConvoImages([]ChatMessage{imageOnly}, true, true)[0]; strings.TrimSpace(out.Content) == "" {
+		t.Error("forceOCR:渲染出了空内容的 user 消息 → 会被 API 400 拒绝")
 	}
 
 	// 只含图片 part、没有文本 part 的消息,给非视觉模型剥图后同样不能空。

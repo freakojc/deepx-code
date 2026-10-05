@@ -45,6 +45,7 @@ type Server struct {
 	OnSetMode        func(mode string) // 权限模式 plan/auto/review
 	OnSetSandbox     func(mode string) // 沙箱 off/native/docker
 	OnSetWorkingMode func(mode string) // 工作模式 karpathy/openspec/superpowers
+	OnSetOcr         func(mode string) // OCR 模式 auto/on/off
 	OnSetLang        func(lang string) // 界面语言 zh/en
 
 	// 左栏操作:压缩会话 / MCP 增删(均需动 live agent 状态,经回调注入)。
@@ -192,6 +193,7 @@ func (s *Server) Serve() error {
 	mux.HandleFunc("/api/mode", s.handleMode)
 	mux.HandleFunc("/api/sandbox", s.handleSandbox)
 	mux.HandleFunc("/api/workingmode", s.handleWorkingMode)
+	mux.HandleFunc("/api/ocr", s.handleOcr)
 	mux.HandleFunc("/api/lang", s.handleLang)
 	// 左栏操作:压缩会话 / MCP 管理 / Skill 管理
 	mux.HandleFunc("/api/compact", s.handleCompact)
@@ -712,6 +714,16 @@ func (s *Server) handleWorkingMode(w http.ResponseWriter, r *http.Request) {
 	s.postField(w, r, "mode", func(m string) {
 		if s.OnSetWorkingMode != nil && m != "" {
 			s.OnSetWorkingMode(m)
+		}
+	})
+}
+
+// handleOcr 浏览器 OCR 模式下拉切换:POST {mode} → OnSetOcr(mode)。
+// mode 取值 auto/on/off;TUI 侧 applyOcrMode 会校验非法值。
+func (s *Server) handleOcr(w http.ResponseWriter, r *http.Request) {
+	s.postField(w, r, "mode", func(m string) {
+		if s.OnSetOcr != nil && m != "" {
+			s.OnSetOcr(m)
 		}
 	})
 }

@@ -168,6 +168,11 @@ type model struct {
 	// 取值缺省 false → 发图走 OCR;true → 发图渲染成 base64 内联,不走 OCR。
 	visionByModel map[string]bool
 
+	// ocrMode 是用户对 OCR 模式的强制选择(全局,存 meta.json):"auto"(默认,按 visionByModel
+	// 探测结果)/ "on"(强制内置 OCR) / "off"(强制模型视觉)。提交时经 visionFor 覆盖各模型
+	// 的 Vision,并作为 agent.ModelEntry.OcrMode 传给 agent(渲染提醒语 + off 撞拒报错文案)。
+	ocrMode string
+
 	// balance 是右栏「模型厂商」段展示的账户剩余金额串(已含币种符号,如 "¥110.00")。
 	// "" = 尚未探到(不显示);"-" = 该供应商不支持查询(见 balance.go / agent.ProbeBalance)。
 	// 每次启动、改配置、切供应商、每轮回答结束时经 balanceMsg 回灌。
@@ -390,6 +395,10 @@ type model struct {
 	showSandboxModal bool
 	sandboxModalIdx  int
 
+	// /ocr 选择 modal 状态。ocrModalIdx ∈ {0:auto, 1:on, 2:off}(见 ocrModeOrder)。
+	showOcrModal bool
+	ocrModalIdx  int
+
 	// /provider 选择 modal 状态。showProviderModal=true 时路由按键到 modal;
 	// providerNames 是 provider.yaml 里已存的供应商名,providerModalIdx 是当前光标。
 	showProviderModal bool
@@ -553,6 +562,7 @@ type webSetModelMsg struct{ role string }           // 路由 auto/flash/pro
 type webSetModeMsg struct{ mode string }            // 权限模式 plan/auto/review
 type webSetSandboxMsg struct{ mode string }         // 沙箱 off/native/docker
 type webSetWorkingModeMsg struct{ mode string }     // 工作模式
+type webSetOcrMsg struct{ mode string }             // OCR 模式 auto/on/off
 type webSetLangMsg struct{ lang string }            // 界面语言 zh/en
 
 // reviewResultMsg 审核完成后从 goroutine 发回,恢复流监听。
@@ -721,6 +731,14 @@ func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub
 	// 视觉能力:先用缓存里上次的值给本会话垫个初值;每次启动都会重探(见 Init → visionProbeCmds),
 	// 探针结果经 visionCapMsg 回灌当前会话并覆盖缓存。
 	visionByModel := loadVisionCaps(models)
+	// OCR 模式:全局级设置(meta.json),启动时恢复;空 / 非法值归一为 auto。
+	// on/off 会覆盖 visionByModel 决定图片走内置 OCR 还是模型视觉(见 visionFor)。
+	ocrMode := metaGet().OcrMode
+	switch ocrMode {
+	case "on", "off":
+	default:
+		ocrMode = "auto"
+	}
 	// 粘贴图片缓存:跟 OCR 解耦后改由这里按时效清理(超过 7 天的旧图删掉),不阻塞启动。
 	go tools.SweepPasteCache(7 * 24 * time.Hour)
 
@@ -735,6 +753,7 @@ func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub
 		input:             ti,
 		models:            models,
 		visionByModel:     visionByModel,
+		ocrMode:           ocrMode,
 		activeModelRole:   role,
 		activeModelID:     activeID,
 		modelPin:          "auto",
@@ -1062,6 +1081,7 @@ func (m model) broadcastControlState() {
 	m.broadcast(web.Event{Kind: "mode", Text: string(m.mode)})
 	m.broadcast(web.Event{Kind: "sandbox", Text: string(tools.CurrentSandboxMode())})
 	m.broadcast(web.Event{Kind: "working_mode", Text: string(m.workingMode)})
+	m.broadcast(web.Event{Kind: "ocr", Text: m.ocrMode})
 	m.broadcast(web.Event{Kind: "codegraph", Text: tools.CodeGraphStatus()})
 	m.broadcast(web.Event{Kind: "show_thinking", Text: onOff(m.showThinking)})
 	m.broadcastSessions()
@@ -1270,8 +1290,10 @@ func (m model) submitUserInput(input string) (model, tea.Cmd) {
 	m.cancelAgent = cancel
 	// 把各模型的视觉能力塞进传给 agent 的配置:agent 发带图请求前据此渲染 base64 / 路径+OCR。
 	models := m.models
-	models.Flash.Vision = m.visionByModel[modelCapKey(models.Flash)]
-	models.Pro.Vision = m.visionByModel[modelCapKey(models.Pro)]
+	models.Flash.Vision = m.visionFor(models.Flash)
+	models.Flash.OcrMode = m.ocrMode
+	models.Pro.Vision = m.visionFor(models.Pro)
+	models.Pro.OcrMode = m.ocrMode
 	cmd, ch := agent.StartStream(
 		ctx,
 		models,
@@ -1460,6 +1482,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyWorkingMode(agent.NormalizeWorkingMode(msg.mode)) // 内部广播 working_mode
 		return m, nil
 
+	case webSetOcrMsg:
+		// 校验只收三态;非法值忽略(web 下拉只会发合法值,防御性过滤)。
+		if msg.mode == "auto" || msg.mode == "on" || msg.mode == "off" {
+			m.applyOcrMode(msg.mode) // 内部广播 ocr
+		}
+		return m, nil
+
 	case webSetLangMsg:
 		switch msg.lang {
 		case string(LangZH):
@@ -1501,7 +1530,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseWheelMsg:
 		// modal 期间忽略
-		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
+		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showOcrModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
 			return m, nil
 		}
 		// 滚轮:按鼠标所在区域分流——输入区翻多行输入,历史区翻对话;顺便取消选区
@@ -1526,7 +1555,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, c
 
 	case tea.MouseClickMsg:
-		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
+		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showOcrModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
 			return m, nil
 		}
 		if msg.Button != tea.MouseLeft {
@@ -1586,7 +1615,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
-		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
+		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showOcrModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
 			return m, nil
 		}
 		if msg.Button != tea.MouseLeft {
@@ -1641,7 +1670,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseReleaseMsg:
-		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
+		if m.showSetup || m.showLangModal || m.showWorkingModeModal || m.showModelModal || m.showSandboxModal || m.showOcrModal || m.showReasoningModal || m.showSessionList || m.showProviderModal {
 			return m, nil
 		}
 		if msg.Button != tea.MouseLeft {
@@ -1989,6 +2018,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.applySandboxMode(sandboxModeOrder[m.sandboxModalIdx])
 			case "esc", "ctrl+c":
 				m.showSandboxModal = false
+				m.input.Focus()
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// /ocr 弹窗:↑/↓ 切行(3 行:auto/on/off),Enter 应用,Esc 取消。
+		if m.showOcrModal {
+			switch msg.String() {
+			case "up", "k":
+				if m.ocrModalIdx > 0 {
+					m.ocrModalIdx--
+				}
+				return m, nil
+			case "down", "j":
+				if m.ocrModalIdx < len(ocrModeOrder)-1 {
+					m.ocrModalIdx++
+				}
+				return m, nil
+			case "enter":
+				m.showOcrModal = false
+				m.input.Focus()
+				m.applyOcrMode(ocrModeOrder[m.ocrModalIdx])
+				return m, nil
+			case "esc", "ctrl+c":
+				m.showOcrModal = false
 				m.input.Focus()
 				return m, nil
 			}
@@ -3640,6 +3695,9 @@ func (m *model) handleSlashCommand(input string) tea.Cmd {
 	if strings.HasPrefix(cmd, "/working-mode") { // 带参数(kp/openspec/sp)
 		return m.handleWorkingModeCommand(cmd)
 	}
+	if strings.HasPrefix(cmd, "/ocr") { // 带参数(auto/on/off)
+		return m.handleOcrCommand(cmd)
+	}
 	// 两组分开维护:-pro 管"升级 pro",-flash 管"维持 flash"。
 	// 命令名带完整后缀,彼此不互为前缀 —— 别再退回 "/router-add" 这种短前缀,
 	// 那会把 -pro / -flash 一起吞掉。
@@ -3796,6 +3854,51 @@ func (m *model) handleWorkingModeCommand(cmd string) tea.Cmd {
 		m.appendChat("assistant", fmt.Sprintf(T("workingmode.unknown"), fields[1]))
 	}
 	return nil
+}
+
+// ocrModeOrder 是 /ocr 弹窗里 OCR 模式的展示顺序,与 ocrModalIdx 对应。
+var ocrModeOrder = []string{"auto", "on", "off"}
+
+// ocrModeIndex 返回指定 OCR 模式在 ocrModeOrder 里的下标(用于弹窗光标定位);未知值回落 0。
+func ocrModeIndex(mode string) int {
+	for i, o := range ocrModeOrder {
+		if o == mode {
+			return i
+		}
+	}
+	return 0
+}
+
+// handleOcrCommand 处理 /ocr [auto|on|off]:无参 → 弹窗选择;带参 → 直接切换。
+func (m *model) handleOcrCommand(cmd string) tea.Cmd {
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 {
+		m.openOcrModal()
+		return nil
+	}
+	switch strings.ToLower(fields[1]) {
+	case "auto", "on", "off":
+		m.applyOcrMode(fields[1])
+	default:
+		m.appendChat("assistant", fmt.Sprintf(T("ocr.unknown"), fields[1]))
+	}
+	return nil
+}
+
+// openOcrModal 打开 OCR 模式选择弹窗,光标停在当前模式。
+func (m *model) openOcrModal() {
+	m.ocrModalIdx = ocrModeIndex(m.ocrMode)
+	m.showOcrModal = true
+	m.input.Blur()
+}
+
+// applyOcrMode 切换 OCR 模式:写全局 meta、给一条提示、广播给 web。
+// 终端命令 / 弹窗 / web 按钮共用此入口,故两边状态对齐。
+func (m *model) applyOcrMode(mode string) {
+	m.ocrMode = mode
+	metaUpdate(func(mm *meta) { mm.OcrMode = mode })
+	m.appendChat("assistant", fmt.Sprintf(T("ocr.switched"), mode))
+	m.broadcast(web.Event{Kind: "ocr", Text: mode})
 }
 
 // handleSessionRenameCommand 处理 /session-rename <新标题>:重命名当前会话(保留大小写)。
@@ -4411,8 +4514,10 @@ func (m *model) startWorkflowTurn(rawInput, name string, args any) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancelAgent = cancel
 	models := m.models
-	models.Flash.Vision = m.visionByModel[modelCapKey(models.Flash)]
-	models.Pro.Vision = m.visionByModel[modelCapKey(models.Pro)]
+	models.Flash.Vision = m.visionFor(models.Flash)
+	models.Flash.OcrMode = m.ocrMode
+	models.Pro.Vision = m.visionFor(models.Pro)
+	models.Pro.OcrMode = m.ocrMode
 
 	cmd, ch := agent.StartWorkflow(ctx, models, m.history, m.mode, workspace, m.skillCatalog, script, args)
 	m.streamCh = ch

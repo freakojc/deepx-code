@@ -186,6 +186,12 @@
             </template>
           </div>
           <label class="ctl">
+            <span class="ctl-label">{{ t('panel.ocr') }}</span>
+            <select :value="ocr" @change="setOcr($event.target.value)">
+              <option v-for="o in ocrOptions" :key="o" :value="o">{{ o }}</option>
+            </select>
+          </label>
+          <label class="ctl">
             <span class="ctl-label">{{ t('panel.routing') }}</span>
             <select :value="routing" @change="setModel($event.target.value)">
               <option v-for="o in routingOptions" :key="o" :value="o">{{ o }}</option>

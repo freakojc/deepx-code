@@ -37,6 +37,9 @@ type ModelEntry struct {
 	// Vision 不是配置项(yaml:"-" 不读不写),只为和 agent.ModelEntry 保持整体可互转。
 	// 模型是否支持视觉由运行时探测决定(见 tui 视觉探测),不进 model.yaml。
 	Vision bool `yaml:"-"`
+	// OcrMode 同样不是配置项(yaml:"-"),与 agent.ModelEntry.OcrMode 保持整体可互转。
+	// 用户对 OCR 模式的强制选择(auto/on/off)存于全局 meta.json,由 tui 在提交时填入。
+	OcrMode string `yaml:"-"`
 }
 
 // Config 整份 model.yaml 的反序列化目标。

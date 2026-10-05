@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,10 @@ var imagePlaceholderRe = regexp.MustCompile(`\[Image #(\d+)\]`)
 const (
 	visionReminder    = "(注:你是视觉模型,无需调用 OCR 工具,请直接识别本条消息中的图片。)"
 	nonVisionReminder = "(注:你不是视觉模型,看不到图片本身,请调用 OCR 工具按本条消息中给出的图片路径逐一识别;不要凭空猜测图片内容。)"
+	// forcedOCRReminder 用于 OcrMode=on 的强制场景:模型本身可能是视觉模型,但用户明确要求
+	// 走内置 OCR。这里不能说"你不是视觉模型"(那是假话,视觉模型会抗命),而是点明这是
+	// 用户设置,要求它按路径调 OCR 识图、别凭自身视觉能力作答。
+	forcedOCRReminder = "(注:已按用户设置强制使用本地 OCR 识图,请调用 OCR 工具按本条消息中给出的图片路径逐一识别;不要凭模型自身视觉能力猜测图片内容。)"
 )
 
 // renderConvoImages 把携带图片(ImagePaths 非空)的消息,按"当轮要跑的模型支不支持视觉"即时渲染成
@@ -28,18 +33,20 @@ const (
 // base64 —— 历史小、缓存友好;base64 只在发请求这一刻临时生成)。
 //
 //   - vision=true  → 文本(去掉 [Image #N])+ 各图 base64 image_url,模型直接看图;
-//   - vision=false → [Image #N] 替换成图片绝对路径放进文本,模型用 img_ocr 按路径识别。
+//   - vision=false → [Image #N] 替换成图片绝对路径放进文本,模型用 img_ocr 按路径识别;
+//   - forceOCR=true 时无论 vision 如何都走"路径+OCR"形态(用户 OcrMode=on 强制内置 OCR),
+//     且提醒语换成 forcedOCRReminder(不说"你不是视觉模型"的假话)。
 //
 // 入口路由和中途 SwitchModel 都走这里 —— 同一条带图消息,发给视觉模型是 base64、发给非视觉模型
 // 是路径+OCR,所以模型中途从视觉切到非视觉也不会因带着 base64 被 4xx 拒掉。
-func renderConvoImages(convo []ChatMessage, vision bool) []ChatMessage {
+func renderConvoImages(convo []ChatMessage, vision bool, forceOCR bool) []ChatMessage {
 	out := make([]ChatMessage, len(convo))
 	for i, m := range convo {
 		switch {
-		case len(m.ImagePaths) > 0 && vision:
+		case len(m.ImagePaths) > 0 && vision && !forceOCR:
 			out[i] = renderImageVision(m)
 		case len(m.ImagePaths) > 0:
-			out[i] = renderImageOCR(m)
+			out[i] = renderImageOCR(m, forceOCR)
 		case !vision && hasImageParts(m):
 			// 铁律兜底:消息里带着(来历不明的)base64 图片 part,但当轮模型不支持视觉 →
 			// 一律剥成纯文本。非视觉模型永远收不到图片,从根上杜绝 "no image input" 404。
@@ -163,7 +170,12 @@ func imagePartFromPath(path string) *ContentPart {
 // renderImageOCR:非视觉模型看不到图。把 [Image #N] 替换成图片绝对路径,并在尾部追加提醒,
 // 显式要求"调 OCR 按路径识别、别凭空猜"——之前只塞路径靠模型自觉,结果它不调还拿旧上下文幻觉
 // (切到 pro 后没 OCR 却编出别的图标)。提醒语对每条带图消息都加(位置无关),保历史渲染稳定、缓存不 miss。
-func renderImageOCR(m ChatMessage) ChatMessage {
+// force=true 是用户 OcrMode=on 的强制场景:提醒语换成 forcedOCRReminder(不说"你不是视觉模型"的假话)。
+func renderImageOCR(m ChatMessage, force bool) ChatMessage {
+	reminder := nonVisionReminder
+	if force {
+		reminder = forcedOCRReminder
+	}
 	replaced := imagePlaceholderRe.ReplaceAllStringFunc(m.Content, func(match string) string {
 		sub := imagePlaceholderRe.FindStringSubmatch(match)
 		if len(sub) < 2 {
@@ -176,9 +188,9 @@ func renderImageOCR(m ChatMessage) ChatMessage {
 		return m.ImagePaths[idx-1]
 	})
 	if strings.TrimSpace(replaced) != "" {
-		replaced += "\n\n" + nonVisionReminder
+		replaced += "\n\n" + reminder
 	} else {
-		replaced = nonVisionReminder
+		replaced = reminder
 	}
 	return ChatMessage{Role: m.Role, Content: replaced}
 }
@@ -308,6 +320,15 @@ func isImageInputUnsupported(err error) bool {
 	}
 	return strings.Contains(s, "image") &&
 		(strings.Contains(s, "not support") || strings.Contains(s, "no endpoints") || strings.Contains(s, "unsupported"))
+}
+
+// ocrOffError 把 OcrMode=off 模式下的"端点拒收图片"错误包装成可读中文 + 切换指引。
+// 只包装用户强制走模型视觉(off)时撞上的拒绝;auto/on 或其它错误原样返回,不越权改文案。
+func ocrOffError(ocrMode, model string, err error) error {
+	if ocrMode != "off" || err == nil || !isImageInputUnsupported(err) {
+		return err
+	}
+	return fmt.Errorf("当前模型 (%s) 不支持图片输入;OCR 模式为 off(强制走模型视觉,已原样发送图片)。可切换回 auto,或用 on 改用内置 OCR 识图。原始错误: %v", model, err)
 }
 
 // imageMimeByExt 按扩展名给出 data URL 的 MIME;粘贴落盘是 PNG,未知一律按 png 兜底。
