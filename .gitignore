@@ -52,3 +52,6 @@ promo
 .notes
 # playwright
 .playwright-mcp
+
+# 本地记忆文件,不提交到仓库
+AGENTS.md
