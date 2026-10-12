@@ -7,14 +7,18 @@ import (
 	"strings"
 
 	"deepx/instance"
+
+	"charm.land/lipgloss/v2"
 )
 
 // instanceDirRe 匹配规范实例目录名 deepx_<数字>(前导零容忍由分配器统一处理)。
 var instanceDirRe = regexp.MustCompile(`^deepx_[0-9]+$`)
 
 // instanceMessage 组装 /instance 的输出:当前编号、实例环境根、父根、共享资产、
-// 派生端口,以及"以 deepx_ 开头但不符合编号规范"的未识别目录(用户手建/改名,不参与自动分配)。
-func instanceMessage() string {
+// 派生端口、web 面板访问地址,以及"以 deepx_ 开头但不符合编号规范"的未识别目录。
+// webURL 传入与 TUI 登录横幅完全一致的地址(含 token,见 web.ready),追加在输出尾部;
+// 空串表示 web 未启动(监听失败/被禁用)。
+func instanceMessage(webURL string) string {
 	var b strings.Builder
 	b.WriteString("**实例信息**\n\n")
 	if wd, err := os.Getwd(); err == nil {
@@ -33,7 +37,29 @@ func instanceMessage() string {
 	if unk := unknownInstanceDirs(); len(unk) > 0 {
 		b.WriteString(fmt.Sprintf("- ⚠️ 未识别的 `deepx_*` 目录(不参与编号分配):%s\n", strings.Join(unk, "、 ")))
 	}
+	// 尾部追加 web 面板访问地址,与 TUI 登录横幅(web.ready)同源一致。
+	// 地址包成 OSC 8 超链接(带下划线高亮),支持点击直达默认浏览器(Windows Terminal 等)。
+	b.WriteString("\n")
+	if webURL == "" {
+		b.WriteString("**本地 Web 面板未启动**\n")
+	} else {
+		b.WriteString("**本地 Web 面板已就绪**\n\n")
+		b.WriteString(linkWebURL(webURL))
+		if webURLExposed(webURL) {
+			b.WriteString("\n\n⚠️ 该地址对外可达(非回环),请勿分享给不可信方")
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
+}
+
+// linkWebURL 把 web 面板地址渲染成可点击的 OSC 8 超链接(点击文字直达浏览器)。
+func linkWebURL(url string) string {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("12")).
+		Underline(true).
+		Hyperlink(url).
+		Render(url)
 }
 
 // registryPath 返回登记表绝对路径(父根/deepx_registry.json)。

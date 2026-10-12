@@ -3850,7 +3850,7 @@ func (m *model) handleSlashCommand(input string) tea.Cmd {
 	case "/status":
 		m.toggleStatusPanel()
 	case "/instance":
-		m.appendChat("assistant", instanceMessage())
+		m.appendChat("assistant", instanceMessage(m.webURL))
 	case "/thinking":
 		m.toggleThinking()
 	case "/new":
