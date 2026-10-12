@@ -700,10 +700,6 @@ func StartStream(
 		// gateNudges = 连续被门禁挡回的次数(死循环保护,见 completionGate)。
 		var lastTodo []PlanItem
 		gateNudges := 0
-		// turnHadTruncation = 本 turn 是否发生过「流被截断/掐断」(finish_reason=length、空响应、
-		// 未收到 [DONE])。截断后即使模型重试成功,收尾时也要主动确认任务是否真正完成
-		// —— 代替用户发送"继续",而不是截断后直接当完成放行导致任务中断。
-		turnHadTruncation := false
 		budgetWarned := false // 输出预算告急提示每轮只发一次(见 OutputBudgetLowMsg)
 
 		// lastFile = 本轮最近操作的文件路径,给 Update 漏 path 时兜底回填(issue #81)。
@@ -833,18 +829,6 @@ func StartStream(
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				// 流被服务端掐断(未收到 [DONE] 但已有半截内容/工具调用):
-				// 不静默当"完成"吞掉(会显示完成却没内容),催模型重新完整回复;连续催到上限仍断则报错。
-				if errors.Is(err, errStreamTruncated) {
-					turnHadTruncation = true
-					if gateNudges < maxGateNudges {
-						gateNudges++
-						convo = append(convo, ChatMessage{Role: "user", Content: streamTruncatedNudge})
-						continue
-					}
-					ch <- StreamErrMsg{errStreamTruncatedLoop}
-					return
-				}
 				// OcrMode=off 且端点拒收图片:自愈已在上面被抑制(用户强制走模型视觉),这里把
 				// 供应商的原文(如 MiMo 的 "No endpoints found that support image input")包成
 				// 可读中文,并给出切换指引 —— 用户需要知道这是 OCR 模式导致的,而不是网络故障。
@@ -867,15 +851,11 @@ func StartStream(
 			// --- 落历史前拦截两类"看似正常结束、实为异常"的响应(issue #169)---
 			// 分类见 classifyStreamResult;两类都不落这条 assistant 进历史,催模型自愈,
 			// 连续到 maxGateNudges 上限仍无法自愈则回一条可读错误,不再空转。
-			if truncated {
-				turnHadTruncation = true // finish_reason=length / 撞 max_tokens:同样记入"曾截断"
-			}
 			switch classifyStreamResult(assistantContent, reasoning, toolCalls, truncated) {
 			case outcomeTruncatedTool:
 				// tool_call 被输出长度上限截断:最后一个 tool_call 的 arguments 是残缺 JSON,
 				// 执行必然 "unexpected end of JSON input";模型只当普通 parse 错、重试同一个
 				// 超大调用 → 再截断 → 死循环,对话卡死无法恢复(会话 A)。催其改用分块重试。
-				turnHadTruncation = true
 				if gateNudges < maxGateNudges {
 					gateNudges++
 					convo = append(convo, ChatMessage{Role: "user", Content: truncatedToolNudge})
@@ -886,7 +866,6 @@ func StartStream(
 			case outcomeEmpty:
 				// 空响应:供应商返回了空(限流 / 不稳定,免费 / 代理端点常见)。别静默当成
 				// "完成"(否则用户只见"无响应 / 卡死",会话 B),催模型重新回复。
-				turnHadTruncation = true
 				if gateNudges < maxGateNudges {
 					gateNudges++
 					convo = append(convo, ChatMessage{Role: "user", Content: emptyResponseNudge})
@@ -912,20 +891,11 @@ func StartStream(
 					convo = append(convo, ChatMessage{Role: "user", Content: nudge})
 					continue
 				}
-				// 本 turn 曾发生截断(流被掐 / 空响应 / length 截断)但已重试成功、也没 todo 可依:
-				// 主动确认任务是否真正完成 —— 代替用户发送"继续",让 LLM 重新评估并接着做,
-				// 而不是截断后直接当"完成"放行导致任务中断。确认一次后即清除标记,不无限纠缠。
-				if turnHadTruncation {
-					turnHadTruncation = false
-					convo = append(convo, ChatMessage{Role: "user", Content: taskContinueNudge})
-					continue
-				}
 				ch <- HistoryUpdateMsg{History: convo}
 				ch <- StreamDoneMsg{}
 				return
 			}
 			gateNudges = 0 // 有工具调用 = 有进展,重置门禁计数
-			turnHadTruncation = false // 模型重新进入任务流程(在调工具),截断影响已被覆盖
 
 			// roundProgress = 本轮是否有任一工具调用成功;决定 noProgressRounds 是归零还是累加。
 			roundProgress := false
@@ -1261,10 +1231,6 @@ const (
 		"(比如上次内容的一半或更少),再用 Update 逐段追加剩下的;不要再整段重复大写入。)"
 	emptyResponseNudge = "(你上一条回复是空的,没有任何文字内容,也没有工具调用。" +
 		"请重新回复:继续完成当前任务,该调用工具就调用工具,不要返回空响应。)"
-	streamTruncatedNudge = "(你上一条回复的响应流被服务端提前中断(连接断开,内容只收到一部分)。" +
-		"请重新完整回复本轮内容:继续完成当前任务,该调用工具就调用工具;已完成的操作不要重复。)"
-	taskContinueNudge = "(你上一轮回复曾因连接中断而重新生成过。请先评估当前任务是否真正完成:" +
-		"若还有未完成的步骤,继续执行并调用相应工具,不要提前收尾;若确实已完成,给出明确的最终总结。)"
 )
 
 // errTruncatedToolLoop / errEmptyResponseLoop:连续催到上限仍无法自愈时回给 UI 的可读错误,
@@ -1273,8 +1239,6 @@ var (
 	errTruncatedToolLoop = errors.New("模型连续多次因输出长度上限截断工具调用(通常是单次写入的文件过大)。" +
 		"请让它把大文件分块写入,或用 /provider 换用输出上限更大的模型。")
 	errEmptyResponseLoop = errors.New("模型连续多次返回空响应,可能是供应商限流或不稳定(免费 / 代理端点常见)。" +
-		"请稍后重试,或用 /provider 换用更稳定的模型。")
-	errStreamTruncatedLoop = errors.New("模型连续多次因响应流被中断而未完成回复(连接不稳定 / 供应商限制)。" +
 		"请稍后重试,或用 /provider 换用更稳定的模型。")
 )
 
@@ -1438,10 +1402,6 @@ const streamHeaderTimeout = 60 * time.Second
 // 前者要明确告诉用户卡在哪(issue #181 的核心诉求)。
 var errStreamIdle = errors.New("流式响应空闲超时")
 
-// errStreamTruncated 是流未以 [DONE] 正常结束(被服务端掐断)的哨兵错误。
-// 主循环识别后不静默当完成,而是催模型重新完整回复(gateNudges 上限内自愈)。
-var errStreamTruncated = errors.New("流式响应未完整结束(未收到 [DONE],连接被中断)")
-
 // streamHTTPClient 专供流式请求:在 DefaultTransport 基础上只加响应头超时,
 // 连接池 / 代理 / TLS 等默认行为原样保留。不设 Client.Timeout —— 那是「整个请求(含读完 body)」
 // 的上限,对流式等于给回复长度设死线,长回复会被拦腰砍断;「活着但不动」由空闲看门狗负责。
@@ -1596,7 +1556,6 @@ func streamAttempt(
 		toolBuf          = map[int]*ToolCall{}
 		lastUsage        *UsageInfo // stream_options.include_usage 会在最后 chunk 返回 usage
 		finishReason     string     // 最后一个非空 finish_reason("stop"/"length"/"tool_calls"…),供主循环判断截断
-		sawDone          bool       // 是否见过 [DONE] 结束标记 —— 没见到 = 流被服务端掐断,不是正常结束
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -1621,7 +1580,6 @@ func streamAttempt(
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
-			sawDone = true
 			break
 		}
 		var chunk sseChunk
@@ -1682,14 +1640,6 @@ func streamAttempt(
 	}
 	if err := scanner.Err(); err != nil {
 		return contentBuilder.String(), reasoningBuilder.String(), nil, finishReason, lastUsage, err
-	}
-
-	// 流被服务端掐断的识别:没收到 [DONE] 结束标记、却已产生内容/工具调用。
-	// 连接中途断开时 body 可能"干净收尾"但缺 [DONE](finish_reason 空串),旧代码会把它当正常完成
-	// 静默吞掉半截回复(issue: AskUser 等待期间连接被掐 → 只回半截 reasoning 却显示"完成")。
-	// 完全没内容的空响应仍返回 nil,交给上层 outcomeEmpty 催重试(自愈路径不变)。
-	if !sawDone && (contentBuilder.Len() > 0 || reasoningBuilder.Len() > 0 || len(toolBuf) > 0) {
-		return contentBuilder.String(), reasoningBuilder.String(), nil, finishReason, lastUsage, errStreamTruncated
 	}
 
 	// 按 index 升序拼装最终 tool_calls。
