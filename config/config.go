@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"deepx/instance"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -117,13 +119,13 @@ var modelConfig = map[string]modelT{
 	},
 }
 
-// Path 返回 ~/.deepx/model.yaml 绝对路径。
+// Path 返回 <配置根>/model.yaml 绝对路径(配置根 = 实例环境根,见 deepx/instance)。
 func Path() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("无法获取用户目录: %w", err)
+	root := instance.Home()
+	if root == "" {
+		return "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, dirName, fileName), nil
+	return filepath.Join(root, fileName), nil
 }
 
 // Exists 配置文件是否已存在。出错或不存在均返回 false。

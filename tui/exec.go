@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"deepx/agent"
+	"deepx/instance"
 	"deepx/skill"
 	"deepx/tools"
 )
@@ -20,15 +21,16 @@ import (
 //   - 出错通过返回值上报,调用方据此给非零退出码。
 func RunExec(cfg agent.ModelConfig, prompt string) error {
 	wd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
+	usrHome, _ := os.UserHomeDir() // 兼容生态目录(.agents/.claude 在用户 home)
+	root := instance.Home()        // deepx 实例根(skills 随实例)
 
 	// skill 发现 + codegraph 绑定,与 TUI 启动时保持一致,保证 exec 下工具能力对齐。
 	loader := skill.New(
 		[]string{filepath.Join(wd, ".deepx", "skills")},
 		[]string{
-			filepath.Join(home, ".agents", "skills"),
-			filepath.Join(home, ".claude", "skills"),
-			filepath.Join(home, ".deepx", "skills"),
+			filepath.Join(usrHome, ".agents", "skills"),
+			filepath.Join(usrHome, ".claude", "skills"),
+			filepath.Join(root, "skills"),
 		},
 	)
 	tools.SetSkillLoader(loader)

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+
+	"deepx/instance"
 )
 
 // prefsCache:会话内冻结的偏好快照。BuildSystemPrompt 每轮读它(不再每轮读盘),
@@ -28,15 +30,15 @@ func currentPrefs() string {
 }
 
 // 持久偏好 / 项目约定(类似 CLAUDE.md):两级 AGENTS.md
-//   - 全局:~/.deepx/AGENTS.md       —— 跨项目的个人工作习惯
+//   - 全局:<配置根>/AGENTS.md       —— 跨项目的个人工作习惯
 //   - 项目:<workspace>/AGENTS.md    —— 仅本仓库的约定
 // 由 Remember 工具写入,BuildSystemPrompt 每次构建 system prompt 时读取并注入。
 
 // loadPreferences 读取全局 + 项目两级偏好,拼成注入用的文本(空则返回空串)。
 func loadPreferences(workspace string) string {
 	var b strings.Builder
-	if home, err := os.UserHomeDir(); err == nil {
-		if c := readTrim(filepath.Join(home, ".deepx", "AGENTS.md")); c != "" {
+	if root := instance.Home(); root != "" {
+		if c := readTrim(filepath.Join(root, "AGENTS.md")); c != "" {
 			b.WriteString("## 全局偏好(适用于所有项目)\n")
 			b.WriteString(c)
 			b.WriteString("\n\n")
@@ -93,11 +95,11 @@ func prefPath(scope, workspace string) (path, header string, err error) {
 		}
 		return filepath.Join(workspace, "AGENTS.md"), "# 项目约定(deepx 自动维护,启动时注入)\n\n", nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", err
+	root := instance.Home()
+	if root == "" {
+		return "", "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, ".deepx", "AGENTS.md"), "# 用户偏好(deepx 全局,自动维护,启动时注入)\n\n", nil
+	return filepath.Join(root, "AGENTS.md"), "# 用户偏好(deepx 全局,自动维护,启动时注入)\n\n", nil
 }
 
 func readTrim(path string) string {

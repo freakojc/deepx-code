@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"deepx/instance"
 	"deepx/tools"
 )
 
@@ -56,6 +57,10 @@ type meta struct {
 	WebPort     int    `json:"web_port,omitempty"`     // 0=随机端口
 }
 
+// baseWebPort 是实例端口派生的基数:deepx_01 → 50529,deepx_02 → 50530,依此类推(50528+编号)。
+// 多实例并行时各实例端口确定且互不冲突,不再用随机端口(见 webPort)。
+const baseWebPort = 50529
+
 // webEnabled / webHost / webPort 从 meta.json 解析 web dashboard 配置,带默认值。
 // 仅走配置文件(~/.deepx/meta.json),不再读环境变量。
 func webEnabled() bool { return !metaGet().WebDisabled }
@@ -67,7 +72,17 @@ func webHost() string {
 	return "127.0.0.1" // 默认仅本机;手机/平板访问需显式设 0.0.0.0(见 issue #55)
 }
 
-func webPort() int { return metaGet().WebPort }
+// webPort 端口一律按实例编号派生:deepx_01→50529, deepx_02→50530 …(50528+编号)。
+// **不再读取 meta.json 的 web_port** —— 旧版/迁移继承的固定端口会被所有实例继承、
+// 造成端口冲突(实测:02 的 meta.json 带着 01 的 50529,启动即 bind 失败)。
+// 实例编号由 deepx_registry.json 绑定 workspace 递增分配,历史实例占用时新实例编号+1,
+// 端口随之 +1,多实例并行端口确定、不冲突。
+func webPort() int {
+	return webPortDerived(instance.InstanceNum())
+}
+
+// webPortDerived 按实例编号算默认端口:deepx_01→50529, deepx_02→50530 …(baseWebPort-1+编号)。
+func webPortDerived(n int) int { return baseWebPort - 1 + n }
 
 // modelPinDefault 返回全局记忆的 /model 选择,给「从没锁过模型」的会话当起手默认。
 // 值域与 /model 一致(auto/flash/pro);空或非法一律回落 "auto",即自动语义路由。
@@ -94,11 +109,11 @@ var (
 )
 
 func metaPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := instance.Home()
+	if home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".deepx", "meta.json")
+	return filepath.Join(home, "meta.json")
 }
 
 // metaGet 返回当前 meta 的值拷贝。首次调用从磁盘加载(文件不存在时尝试从老的
@@ -158,14 +173,14 @@ func saveMetaLocked(m meta) {
 	_ = os.WriteFile(p, data, 0o644)
 }
 
-// migrateLegacyLang 读老的 ~/.deepx/lang(纯文本 "zh"/"en")迁移语言选择。
+// migrateLegacyLang 读老的 lang 文件(父根顶层,旧版留在原地)迁移语言选择。
 // 读不到 / 内容不识别返回 "" —— 上层会回退默认中文。
 func migrateLegacyLang() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	base := instance.BaseRoot()
+	if base == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".deepx", "lang"))
+	data, err := os.ReadFile(filepath.Join(base, "lang"))
 	if err != nil {
 		return ""
 	}

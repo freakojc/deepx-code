@@ -6,6 +6,7 @@ import (
 	"deepx/session"
 	"deepx/tools"
 	"deepx/web"
+	"fmt"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -24,10 +25,11 @@ func Run(models agent.ModelConfig, needsSetup bool, version string) error {
 	// 运行中产生的帧 Terminal.app 仍会缓存到自己的 scrollback,无解(同 vim/less)。
 	os.Stderr.Write([]byte("\x1b[3J"))
 
-	// web dashboard:能起就起,起不来(端口占用等)静默降级 —— 不影响终端 TUI。
+	// web dashboard:能起就起,起不来(端口占用等)降级 —— 不影响终端 TUI。
+	// webNote 携带失败原因,由 TUI 在对话流里显示(见 initialModel)。
 	var hub *web.Hub
 	var srv *web.Server
-	var webURL string
+	var webURL, webNote string
 	if webEnabled() {
 		wd, _ := os.Getwd()
 		hub = web.NewHub(models.Flash.Model, models.Pro.Model, wd, string(CurrentLang()))
@@ -39,7 +41,11 @@ func Run(models agent.ModelConfig, needsSetup bool, version string) error {
 		if url, err := srv.Listen(webHost(), webPort()); err == nil {
 			webURL = url
 		} else {
-			// 监听失败 → 关掉 web,TUI 照常跑。
+			// 监听失败 → 关掉 web,TUI 照常跑。多实例场景下常因固定端口被另一个实例占用,
+			// 静默降级会让用户无从得知,把原因作为一条 System 消息显示在对话流
+			// (不再裸写 stderr —— 进入 alt-screen 前写入的 stderr 残留在 Windows 终端
+			// 会盖住输入区,造成"运行中打字看不见"的假象)。
+			webNote = fmt.Sprintf("web dashboard 未启动(监听 %s:%d 失败): %v。TUI 不受影响,继续使用。", webHost(), webPort(), err)
 			hub = nil
 			srv = nil
 		}
@@ -47,7 +53,7 @@ func Run(models agent.ModelConfig, needsSetup bool, version string) error {
 
 	// v2 把 alt-screen / mouse mode 从 Program option 移到了 View 结构体字段。
 	// 见 tui/view.go 的 wrapView(): 每帧返回的 tea.View 里设 AltScreen=true + MouseMode。
-	p := tea.NewProgram(initialModel(models, needsSetup, version, hub, srv, webURL))
+	p := tea.NewProgram(initialModel(models, needsSetup, version, hub, srv, webURL, webNote))
 
 	if srv != nil {
 		// 浏览器输入 / review 确认 → program.Send 注入,走和终端完全相同的 Update 逻辑。

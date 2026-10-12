@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"deepx/instance"
 	"sort"
 	"strings"
 	"time"
@@ -127,18 +128,18 @@ func New(workspace string) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("abs path: %w", err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("user home: %w", err)
+	home := instance.Home()
+	if home == "" {
+		return nil, fmt.Errorf("无法定位配置目录")
 	}
 	sid := sessionIDFor(abs)
-	root := filepath.Join(home, ".deepx", "sessions", sid)
+	root := filepath.Join(home, "sessions", sid)
 
 	// 迁移(issue #121):旧版本直接用原始大小写哈希。Windows 路径大小写不敏感,归一为小写后
 	// sid 会变,老用户的历史目录(原始大小写哈希)就对不上、看似"丢了"。若新目录还没有、但本次
 	// 启动大小写对应的旧目录存在,改名过去保住历史。Linux 大小写敏感,rawSid==sid,此段不触发。
 	if rawSid := rawSessionID(abs); rawSid != sid {
-		oldRoot := filepath.Join(home, ".deepx", "sessions", rawSid)
+		oldRoot := filepath.Join(home, "sessions", rawSid)
 		if !dirExists(root) && dirExists(oldRoot) {
 			_ = os.Rename(oldRoot, root) // 失败不致命:退化为新建空 session
 		}

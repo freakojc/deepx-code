@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"deepx/instance"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,6 +77,8 @@ func TestLoader_RejectsBadName(t *testing.T) {
 }
 
 func TestDefaultDirs(t *testing.T) {
+	// .deepx/workflows 全局层随实例根(instance.Home),测试里用 DEEPX_HOME 隔离。
+	t.Setenv("DEEPX_HOME", t.TempDir())
 	proj, glob := DefaultDirs("/ws", "/home/u")
 	// 同时扫 .claude(兼容 Claude Code)和 .deepx(自家),.deepx 在后(同名覆盖)。
 	eq := func(got, want []string) bool {
@@ -90,7 +93,10 @@ func TestDefaultDirs(t *testing.T) {
 		return true
 	}
 	wantProj := []string{filepath.Join("/ws", ".claude", "workflows"), filepath.Join("/ws", ".deepx", "workflows")}
-	wantGlob := []string{filepath.Join("/home/u", ".claude", "workflows"), filepath.Join("/home/u", ".deepx", "workflows")}
+	wantGlob := []string{
+		filepath.Join("/home/u", ".claude", "workflows"),
+		filepath.Join(instance.Home(), "workflows"), // .deepx/workflows 随实例根
+	}
 	if !eq(proj, wantProj) {
 		t.Fatalf("proj dirs = %v, want %v", proj, wantProj)
 	}

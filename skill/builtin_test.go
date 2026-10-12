@@ -77,8 +77,8 @@ func TestDiskOverridesBuiltin(t *testing.T) {
 
 // 一次性清理:有旧抽取标记时,删掉内置名目录(含清单里已移除的内置),不碰用户自定义 skill。
 func TestCleanupExtractedBuiltins(t *testing.T) {
-	home := t.TempDir()
-	dest := filepath.Join(home, ".deepx", "skills")
+	root := t.TempDir() // 参数语义 = 配置根(instance.Home),函数内拼 root/skills
+	dest := filepath.Join(root, "skills")
 	mk := func(name, content string) {
 		if err := os.MkdirAll(filepath.Join(dest, name), 0o755); err != nil {
 			t.Fatal(err)
@@ -105,7 +105,7 @@ func TestCleanupExtractedBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	CleanupExtractedBuiltins(home)
+	CleanupExtractedBuiltins(root)
 
 	exists := func(name string) bool {
 		_, err := os.Stat(filepath.Join(dest, name))
@@ -141,8 +141,8 @@ func TestBuiltinSkillNamesCoversEmbed(t *testing.T) {
 
 // 没有旧抽取标记时,清理必须是 no-op(不动任何东西)。
 func TestCleanupNoMarkersIsNoop(t *testing.T) {
-	home := t.TempDir()
-	dest := filepath.Join(home, ".deepx", "skills")
+	root := t.TempDir() // 配置根语义(函数内拼 root/skills)
+	dest := filepath.Join(root, "skills")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestCleanupNoMarkersIsNoop(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dest, builtinName), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	CleanupExtractedBuiltins(home)
+	CleanupExtractedBuiltins(root)
 	if _, err := os.Stat(filepath.Join(dest, builtinName)); err != nil {
 		t.Error("无迁移标记时不应删除任何目录")
 	}

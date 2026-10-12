@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"deepx/instance"
 	"deepx/ocr"
 	"fmt"
 	"os"
@@ -53,14 +54,16 @@ func ImgOCR(args map[string]any) ToolResult {
 	return ToolResult{Output: text, Success: true}
 }
 
-// PasteCacheDir 返回粘贴图片的缓存目录 ~/.deepx/ocr/cache;home 取不到则返回空串。
+// PasteCacheDir 返回粘贴图片的缓存目录 <实例环境根>/ocr/cache。
+// **实例隔离**:OCR 模型资产(DefaultCacheDir)跨实例共享,但粘贴缓存里是"本实例正在使用的图",
+// 启动清扫(SweepPasteCache)按实例各清各的,不会误删其它实例会话中还要重发的附件。
 // 单一来源:落盘(saveAttachedImage)、清理(SweepPasteCache)、视觉模型 OCR 拦截判定都用它。
 func PasteCacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	root := instance.Home()
+	if root == "" {
 		return ""
 	}
-	return filepath.Join(home, ".deepx", "ocr", "cache")
+	return filepath.Join(root, "ocr", "cache")
 }
 
 // SweepPasteCache 清理 ~/.deepx/ocr/cache 下修改时间超过 maxAge 的粘贴图片。

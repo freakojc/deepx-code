@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +46,9 @@ func buildSlowListServer(t *testing.T) string {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(dir, "slowserver")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // Windows 无扩展名可执行文件无法被拉起
+	}
 	cmd := exec.Command("go", "build", "-o", bin, src)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("编译失败: %v\n%s", err, out)

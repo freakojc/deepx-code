@@ -4,6 +4,7 @@ import (
 	"deepx/agent"
 	"deepx/codegraph"
 	"deepx/config"
+	"deepx/instance"
 	"deepx/tools"
 	"deepx/tui"
 	"fmt"
@@ -49,6 +50,17 @@ func main() {
 		}
 		return
 	}
+	// 多实例环境:分配实例编号(deepx_NN)、获取独占锁、必要时把旧环境迁移进 deepx_01。
+	// 必须在任何读配置的路径(TUI / exec)之前 —— 未 Init 会静默回退旧位置,隔离失效。
+	// --version / __codegraph-build / upgrade 已在上方 return,不创建实例目录、不占锁。
+	// 失败(显式编号非法或被占用、父根不可写、迁移失败)一律视为启动失败退出,不降级。
+	if _, err := instance.Init(); err != nil {
+		fmt.Fprintln(os.Stderr, "错误:", err)
+		os.Exit(1)
+	}
+	// 语言从磁盘加载必须在 Init 之后:包级 init() 若做这件事会早于 Init,
+	// 读到父根(旧位置)的 meta 并缓存,污染实例 meta.json。
+	tui.InitLang()
 	// deepx exec [--mode plan|auto] "<任务>" —— 非交互一次性执行,结果打到 stdout,可脚本化 / 管道。
 	// 也可从 stdin 接管道输入(cat x | deepx exec "分析这段")。默认 auto(全工具,不弹审批)。
 	if len(os.Args) > 1 && os.Args[1] == "exec" {

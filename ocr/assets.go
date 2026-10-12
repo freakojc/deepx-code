@@ -74,9 +74,19 @@ func EnsureAssets(cacheDir string, onProgress ProgressFunc) error {
 	return os.WriteFile(filepath.Join(cacheDir, readyMarker), []byte("ok"), 0644)
 }
 
+// isReady 校验资产**齐全**:.ready 标记 + 四个关键文件都存在(ORT 动态库 + det + rec + dict)。
+// 只看 .ready 会和文件脱钩——模型被误删/损坏后 .ready 还在,会误判"就绪"、永不重新下载
+// (多实例共享同一资产目录,任何实例或用户动过文件都会全断,这个判据不能省)。
 func isReady(cacheDir string) bool {
-	_, err := os.Stat(filepath.Join(cacheDir, readyMarker))
-	return err == nil
+	if _, err := os.Stat(filepath.Join(cacheDir, readyMarker)); err != nil {
+		return false
+	}
+	for _, f := range []string{ortLibName, detModelFile, recModelFile, dictFile} {
+		if !fileExists(filepath.Join(cacheDir, f)) {
+			return false
+		}
+	}
+	return true
 }
 
 func fileExists(path string) bool {

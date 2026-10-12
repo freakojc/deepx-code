@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"deepx/instance"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -61,11 +62,11 @@ func checkForUpgradeCmd(currentVersion string) tea.Cmd {
 // 时写入 ~/.deepx/.upgrade_source(纯文本一行)—— 用独立标记文件而非塞进 meta.json,是为了
 // 避免在 shell 里合并 JSON(没 jq 也能 echo 一行)。读不到或非法值一律按 github。
 func upgradeSource() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := instance.Home()
+	if home == "" {
 		return "github"
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".deepx", ".upgrade_source"))
+	data, err := os.ReadFile(filepath.Join(home, ".upgrade_source"))
 	if err != nil {
 		return "github"
 	}

@@ -211,7 +211,7 @@ func (m *model) handleRouterListCommand(key string) {
 	fmt.Fprintf(&sb, "- `/router-add-%s <整句>` 添加\n", key)
 	fmt.Fprintf(&sb, "- `/router-delete-%s <序号>` 删除\n", key)
 	fmt.Fprintf(&sb, "- `/router-list-%s` 看另一组\n", other)
-	sb.WriteString("- 也可直接编辑 `~/.deepx/router.yaml`,下一条消息即生效\n")
+	sb.WriteString("- 也可直接编辑 `router.yaml`(路径见 /instance),下一条消息即生效\n")
 
 	sb.WriteString("\n")
 	sb.WriteString(routerStatusLine())

@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"deepx/instance"
 )
 
 // === /skill-add 和 /skill-delete 的纯逻辑层 ===
@@ -25,13 +27,13 @@ import (
 //  3. 安装时不执行任何下载内容,SKILL.md 是 markdown 文本,LLM 读取后自己理解,
 //     工具层零代码执行风险
 
-// InstalledDir 返回 ~/.deepx/skills 绝对路径,目录不存在不报错(Install 时会自动创建)。
+// InstalledDir 返回 <配置根>/skills 绝对路径,目录不存在不报错(Install 时会自动创建)。
 func InstalledDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("无法定位用户目录: %w", err)
+	root := instance.Home()
+	if root == "" {
+		return "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, ".deepx", "skills"), nil
+	return filepath.Join(root, "skills"), nil
 }
 
 // InstalledList 列出已安装在 ~/.deepx/skills/ 下的 skill 元数据(name 字典序)。
@@ -292,10 +294,11 @@ func Install(src string) (string, error) {
 	switch {
 	case strings.HasPrefix(src, "https://github.com/"), strings.HasPrefix(src, "http://github.com/"):
 		return installFromGitHub(src, root)
-	case strings.HasPrefix(src, "/"),
+	case strings.HasPrefix(src, "/"), // /abs/path(Linux/macOS)
 		strings.HasPrefix(src, "./"),
 		strings.HasPrefix(src, "../"),
-		strings.HasPrefix(src, "~"):
+		strings.HasPrefix(src, "~"),
+		filepath.IsAbs(src): // Windows 盘符 C:\... / UNC \\... (t.TempDir() 在 Windows 是盘符路径)
 		return installFromLocal(src, root)
 	}
 	return "", fmt.Errorf("无法识别 source(支持 https://github.com/... 或本地路径):%s", src)

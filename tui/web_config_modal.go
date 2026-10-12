@@ -9,39 +9,34 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// openWebConfigModal 给 /web-config:弹单行输入框设置 web 面板绑定 IP + 端口。
-// 预填当前 meta.json 里的值,方便在原值上改。
+// openWebConfigModal 给 /web-config:弹单行输入框设置 web 面板绑定 IP。
+// 端口由实例编号自动派生(50528+N),不在输入里设置;预填当前 host 方便在原值上改。
 func (m *model) openWebConfigModal() {
 	m.showWebConfig = true
 	m.webConfigErr = ""
 	cur := metaGet()
 	val := strings.TrimSpace(cur.WebHost)
-	if cur.WebPort > 0 {
-		if val == "" {
-			val = "127.0.0.1"
-		}
-		val += " " + strconv.Itoa(cur.WebPort)
-	}
 	m.webConfigInput.SetValue(val)
 	m.webConfigInput.Focus()
 	m.input.Blur()
 }
 
-// submitWebConfig 解析 "<IP> [端口]",校验后写入 meta.json,并热重绑 web 服务、立刻显示新地址。
+// submitWebConfig 解析 "IP [端口]",校验后只写 host 到 meta.json,并热重绑 web 服务、
+// 立刻显示新地址(端口仍按实例编号派生)。端口输入兼容旧习惯但不再生效。
 // 成功关弹窗;失败留 webConfigErr 重试。
 func (m *model) submitWebConfig() {
 	fields := strings.Fields(m.webConfigInput.Value())
-	host, port := "", 0
+	host := ""
 	if len(fields) >= 1 {
 		host = fields[0]
 	}
+	// 端口输入(兼容旧习惯)仍校验合法性,但忽略——端口由实例编号派生。
 	if len(fields) >= 2 {
 		p, err := strconv.Atoi(fields[1])
 		if err != nil || p < 0 || p > 65535 {
 			m.webConfigErr = T("web.config.err.port")
 			return
 		}
-		port = p
 	}
 	// host 允许:空(=默认 127.0.0.1 仅本机)、localhost、合法 IP(含 0.0.0.0)。
 	if host != "" && host != "localhost" && net.ParseIP(host) == nil {
@@ -51,7 +46,6 @@ func (m *model) submitWebConfig() {
 
 	metaUpdate(func(mm *meta) {
 		mm.WebHost = host
-		mm.WebPort = port
 	})
 
 	m.showWebConfig = false
@@ -63,15 +57,12 @@ func (m *model) submitWebConfig() {
 	if shownHost == "" {
 		shownHost = "127.0.0.1"
 	}
-	portText := T("web.config.port.random")
-	if port > 0 {
-		portText = strconv.Itoa(port)
-	}
+	portText := strconv.Itoa(webPort()) // 实例派生端口
 	m.appendChat("System", fmt.Sprintf(T("web.config.saved"), shownHost, portText))
 
-	// web 面板开着 → 热重绑到新地址,立刻显示新 URL;关着 → 仅保存,下次启动生效。
+	// web 面板开着 → 热重绑到新 host,立刻显示新 URL;关着 → 仅保存,下次启动生效。
 	if m.srv != nil {
-		if url, err := m.srv.Relisten(host, port); err == nil {
+		if url, err := m.srv.Relisten(host, webPort()); err == nil {
 			m.webURL = url
 			m.appendChat("System", fmt.Sprintf(T("web.ready"), url))
 			if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {

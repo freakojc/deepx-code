@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"deepx/instance"
 	"deepx/tools"
 )
 
@@ -24,13 +25,13 @@ type ServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// configFile 是 MCP server 配置的落盘位置:~/.deepx/mcp.json。
+// configFile 是 MCP server 配置的落盘位置:<配置根>/mcp.json。
 func configFile() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	root := instance.Home()
+	if root == "" {
+		return "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, ".deepx", "mcp.json"), nil
+	return filepath.Join(root, "mcp.json"), nil
 }
 
 type configDoc struct {

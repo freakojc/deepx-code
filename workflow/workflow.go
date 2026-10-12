@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"deepx/instance"
 )
 
 // Script 是一个加载完成的 workflow 脚本。
@@ -61,9 +63,11 @@ func New(projectDirs, globalDirs []string) *Loader {
 	return &Loader{ProjectDirs: projectDirs, GlobalDirs: globalDirs}
 }
 
-// DefaultDirs 给定 workspace 和 home,返回 workflow 发现目录。
+// DefaultDirs 给定 workspace 和用户 home,返回 workflow 发现目录。
 // 同时扫 .claude/workflows(兼容 Claude Code 的 workflow,拷进来即可跑)和 .deepx/workflows
 // (deepx 自己 create/save 的去处)。组内后者覆盖前者,故 .deepx 同名覆盖 .claude。
+// home 只用于兼容生态目录(~/.claude/workflows);deepx 自己的全局 workflows 随实例根
+// (instance.Home()/workflows,多实例各自隔离)。
 func DefaultDirs(workspace, home string) (projectDirs, globalDirs []string) {
 	if workspace != "" {
 		projectDirs = []string{
@@ -74,8 +78,10 @@ func DefaultDirs(workspace, home string) (projectDirs, globalDirs []string) {
 	if home != "" {
 		globalDirs = []string{
 			filepath.Join(home, ".claude", "workflows"),
-			filepath.Join(home, ".deepx", "workflows"),
 		}
+	}
+	if root := instance.Home(); root != "" {
+		globalDirs = append(globalDirs, filepath.Join(root, "workflows"))
 	}
 	return projectDirs, globalDirs
 }

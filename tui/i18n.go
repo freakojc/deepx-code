@@ -16,7 +16,10 @@ const (
 // View() 渲染线程跟 Update() 修改线程读到的值各自一致。
 var currentLang atomic.Value
 
-func init() {
+// InitLang 从磁盘加载语言并缓存。**必须在 instance.Init() 之后调用**:若放在包级 init()
+// (它在 main 的 Init 之前执行),metaPath 会指向父根(旧位置),读到旧 meta 并缓存,
+// 导致实例 meta.json 被旧值(web_port 等)污染写回。main 在 Init 成功后调用。
+func InitLang() {
 	currentLang.Store(loadLangFromDisk())
 }
 
@@ -98,8 +101,8 @@ var translations = map[string]map[Lang]string{
 		LangEN: "Search Clawhub & install (or paste GitHub URL, incl. /tree/<branch>/<dir> form)",
 	},
 	"cmd.skill-delete.desc": {
-		LangZH: "删除 ~/.deepx/skills/ 下的 skill(弹窗)",
-		LangEN: "Delete a skill from ~/.deepx/skills/ (popup)",
+		LangZH: "删除当前实例 skills/ 下的 skill(弹窗)",
+		LangEN: "Delete a skill from this instance's skills/ (popup)",
 	},
 	"cmd.ultracode.desc": {
 		LangZH: "据描述创建 workflow:/ultracode <描述>",
@@ -168,6 +171,10 @@ var translations = map[string]map[Lang]string{
 	"cmd.status.desc": {
 		LangZH: "显示/隐藏右侧状态栏(也可按 Ctrl+B)",
 		LangEN: "Show/hide the right status panel (or press Ctrl+B)",
+	},
+	"cmd.instance.desc": {
+		LangZH: "显示当前实例的编号与环境目录路径",
+		LangEN: "Show current instance number and its env root path",
 	},
 	"mouse.passthrough.on": {
 		LangZH: "🖱 鼠标穿透已开启:文字选择与右键粘贴交回终端处理(deepx 的选区/复制、滚轮、拖拽暂停)。再按 F2 恢复。",
@@ -398,8 +405,8 @@ var translations = map[string]map[Lang]string{
 			"- `/auto` — 切回全工具模式(默认)\n" +
 			"- `/review` — 切到审核模式(Write/Update/Bash 需人工确认)\n" +
 			"- `/mode` — 显示当前模式\n" +
-			"- `/config` — 重新配置 API key (覆盖 `~/.deepx/model.yaml`)\n" +
-			"- `/provider` — 在已配置的供应商间快捷切换(`/provider [名字]`;配置存于 `~/.deepx/provider.yaml`。自定义供应商可在 /config 里起名,多份配置各占一槽)\n" +
+			"- `/config` — 重新配置 API key (覆盖 `<配置根>/model.yaml`)\n" +
+			"- `/provider` — 在已配置的供应商间快捷切换(`/provider [名字]`;配置存于 `<配置根>/provider.yaml`。自定义供应商可在 /config 里起名,多份配置各占一槽)\n" +
 			"- `/skills` — 列出可用 skill\n" +
 			"- `/skill-add` `/skill-delete` — 搜索安装 / 删除 skill\n" +
 			"- `/mcp-list` `/mcp-add` `/mcp-delete` — 管理 MCP server\n" +
@@ -412,6 +419,7 @@ var translations = map[string]map[Lang]string{
 			"- `/new` — 开启全新对话(当前对话已保存,可在 /sessions 找回)\n" +
 			"- `/sessions` — 历史对话列表(↑/↓ 选,Enter 切换)\n" +
 			"- `/status` — 显示/隐藏右侧状态栏(也可按 Ctrl+B)\n" +
+			"- `/instance` — 显示当前实例编号与环境目录路径(多实例:deepx_01/02/…)\n" +
 			"- `/thinking` — 显示/隐藏模型思考过程(reasoning)\n" +
 			"- `/web-config` — 配置 web 面板绑定 IP / 端口(局域网访问,立即生效并显示新地址)\n" +
 			"- `/sandbox` — 沙箱模式:`off`(关闭)/ `native`(OS 隔离,默认)/ `docker`(容器隔离)\n" +
@@ -435,8 +443,8 @@ var translations = map[string]map[Lang]string{
 			"- `/auto` — Switch back to full-tools mode (default)\n" +
 			"- `/review` — Switch to review mode (Write/Update/Bash require confirmation)\n" +
 			"- `/mode` — Show current mode\n" +
-			"- `/config` — Reconfigure API key (overwrites `~/.deepx/model.yaml`)\n" +
-			"- `/provider` — Quick-switch between configured providers (`/provider [name]`; saved in `~/.deepx/provider.yaml`. Name your custom providers in /config so each gets its own slot)\n" +
+			"- `/config` — Reconfigure API key (overwrites `<配置根>/model.yaml`)\n" +
+			"- `/provider` — Quick-switch between configured providers (`/provider [name]`; saved in `<配置根>/provider.yaml`. Name your custom providers in /config so each gets its own slot)\n" +
 			"- `/skills` — List available skills\n" +
 			"- `/skill-add` `/skill-delete` — Search-install / delete skills\n" +
 			"- `/mcp-list` `/mcp-add` `/mcp-delete` — Manage MCP servers\n" +
@@ -449,6 +457,7 @@ var translations = map[string]map[Lang]string{
 			"- `/new` — Start a brand-new conversation (current one is saved, see /sessions)\n" +
 			"- `/sessions` — Conversation history (↑/↓ select, Enter switch)\n" +
 			"- `/status` — Show/hide the right status panel (or press Ctrl+B)\n" +
+			"- `/instance` — Show current instance number & env root path (multi-instance: deepx_01/02/…)\n" +
 			"- `/thinking` — Show/hide the model's thinking (reasoning)\n" +
 			"- `/web-config` — Configure web dashboard bind IP / port (LAN access, applied immediately, shows the new URL)\n" +
 			"- `/sandbox` — Sandbox mode: `off` / `native` (OS isolation, default) / `docker` (container isolation)\n" +
@@ -599,19 +608,19 @@ var translations = map[string]map[Lang]string{
 	},
 	"setup.hint.first_run": {
 		LangZH: "看起来这是首次启动。请粘贴你的 API key。\n" +
-			"配置会写入 ~/.deepx/model.yaml(权限 0600),之后启动不再询问。\n" +
+			"配置会写入 <实例环境根>/model.yaml(权限 0600),之后启动不再询问。\n" +
 			"以后可直接编辑该文件,或在聊天中输入 /config 重开本面板。",
 		LangEN: "Looks like first launch. Paste your API key below.\n" +
-			"Config saves to ~/.deepx/model.yaml (perms 0600); won't ask again.\n" +
+			"Config saves to the instance env root's model.yaml (perms 0600); won't ask again.\n" +
 			"Edit that file directly later, or type /config in chat to reopen.",
 	},
 	"setup.hint.reconfig": {
 		LangZH: "修改 API key — 旧值会被覆盖。\n" +
 			"提交后立即生效;Esc 取消不保存。\n" +
-			"如果你只想换 base_url / model id,直接编辑 ~/.deepx/model.yaml 重启即可。",
+			"如果你只想换 base_url / model id,直接编辑当前实例的 model.yaml(路径见 /instance)重启即可。",
 		LangEN: "Change API key — the old value will be overwritten.\n" +
 			"Saves take effect immediately; Esc to cancel.\n" +
-			"To change base_url / model id only, edit ~/.deepx/model.yaml directly and restart.",
+			"To change base_url / model id only, edit the current instance's model.yaml (see /instance) and restart.",
 	},
 	"setup.provider_label":  {LangZH: "选择模型提供商 (↑/↓ 切换):", LangEN: "Choose model provider (↑/↓ to switch):"},
 	"setup.saved_section":   {LangZH: "── 已保存的自定义(选中即可修改)──", LangEN: "── Saved custom (select to edit) ──"},
@@ -854,8 +863,8 @@ var translations = map[string]map[Lang]string{
 		LangEN: "Configure Web Dashboard",
 	},
 	"web.config.hint": {
-		LangZH: "填「IP [端口]」,空格分隔:\n  IP 留空 / 127.0.0.1 = 仅本机;0.0.0.0 = 局域网(手机/平板可访问);也可填某网卡 IP\n  端口可省略(随机)。例:0.0.0.0 8080\n  ⚠️ 面板可控制会话、执行命令,且明文 HTTP —— 对外暴露仅限可信局域网",
-		LangEN: "Enter \"IP [port]\" (space-separated):\n  empty / 127.0.0.1 = local only;  0.0.0.0 = LAN (phone/tablet);  or a specific NIC IP\n  port optional (random). e.g. 0.0.0.0 8080\n  ⚠️ The panel can control the session & run commands over plain HTTP — expose only on trusted LANs",
+		LangZH: "填「IP」即可(空格分隔的端口输入兼容但不再生效):\n  IP 留空 / 127.0.0.1 = 仅本机;0.0.0.0 = 局域网(手机/平板可访问);也可填某网卡 IP\n  端口由实例编号自动分配(deepx_01→50529, 02→50530 …),无需填写\n  ⚠️ 面板可控制会话、执行命令,且明文 HTTP —— 对外暴露仅限可信局域网",
+		LangEN: "Enter \"IP\" (a port is accepted for compatibility but no longer takes effect):\n  empty / 127.0.0.1 = local only;  0.0.0.0 = LAN (phone/tablet);  or a specific NIC IP\n  Port is auto-derived from the instance number (deepx_01→50529, 02→50530 …)\n  ⚠️ The panel can control the session & run commands over plain HTTP — expose only on trusted LANs",
 	},
 	"web.config.footer": {
 		LangZH: "Enter 保存(重启生效) · Esc 取消",
@@ -878,8 +887,8 @@ var translations = map[string]map[Lang]string{
 		LangEN: "Invalid IP: enter a valid IP (e.g. 0.0.0.0 / 192.168.1.5), 127.0.0.1, or leave empty",
 	},
 	"web.config.err.port": {
-		LangZH: "端口不合法:请填 0–65535 的整数(留空 = 随机)",
-		LangEN: "Invalid port: enter an integer 0–65535 (empty = random)",
+		LangZH: "端口不合法(0–65535 的整数,可省略——端口已由实例编号自动分配)",
+		LangEN: "Invalid port: enter an integer 0–65535, or omit it (port is auto-derived from the instance number)",
 	},
 	"welcome": {
 		LangZH: "欢迎使用 **deepx-code**,输入 `/help` 查看命令与快捷键。",

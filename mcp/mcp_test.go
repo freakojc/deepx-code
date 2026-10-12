@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -44,6 +45,9 @@ func buildFakeServer(t *testing.T) string {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(dir, "fakeserver")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // Windows 上无扩展名可执行文件无法被 CreateProcess 直接拉起
+	}
 	cmd := exec.Command("go", "build", "-o", bin, src)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("编译假 server 失败: %v\n%s", err, out)

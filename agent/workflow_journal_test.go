@@ -39,12 +39,12 @@ func TestWorkflowJournal_PersistReloadResume(t *testing.T) {
 }
 
 func TestWorkflowJournal_DiscardAndArgsIsolation(t *testing.T) {
-	home := t.TempDir()
+	root := t.TempDir() // 配置根语义(loadWorkflowJournal 内部拼 root/workflows/.journal)
 	src := `export const meta={name:"j"};`
 
-	jA, _, _ := loadWorkflowJournal(home, "j", src, []byte(`{"a":1}`), "")
+	jA, _, _ := loadWorkflowJournal(root, "j", src, []byte(`{"a":1}`), "")
 	jA.Put(0, "ra")
-	jB, cached, _ := loadWorkflowJournal(home, "j", src, []byte(`{"a":2}`), "") // 不同 args → 独立 journal
+	jB, cached, _ := loadWorkflowJournal(root, "j", src, []byte(`{"a":2}`), "") // 不同 args → 独立 journal
 	if cached != 0 {
 		t.Fatalf("不同 args 应独立(cached=0), got %d", cached)
 	}
@@ -55,12 +55,12 @@ func TestWorkflowJournal_DiscardAndArgsIsolation(t *testing.T) {
 	if _, err := os.Stat(jA.path); !os.IsNotExist(err) {
 		t.Fatalf("Discard 后 journal 文件应被删:%v", err)
 	}
-	jA2, cached, _ := loadWorkflowJournal(home, "j", src, []byte(`{"a":1}`), "")
+	jA2, cached, _ := loadWorkflowJournal(root, "j", src, []byte(`{"a":1}`), "")
 	if cached != 0 {
 		t.Fatalf("Discard 后重载应 cached=0, got %d", cached)
 	}
-	// journal 应落在 ~/.deepx/workflows/.journal/ 下
-	if filepath.Dir(jA2.path) != filepath.Join(home, ".deepx", "workflows", ".journal") {
+	// journal 应落在 <配置根>/workflows/.journal/ 下
+	if filepath.Dir(jA2.path) != filepath.Join(root, "workflows", ".journal") {
 		t.Fatalf("journal 路径不对: %s", jA2.path)
 	}
 }

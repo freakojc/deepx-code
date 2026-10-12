@@ -116,7 +116,7 @@ func (m *model) openSkillDeleteModal() {
 		return
 	}
 	if len(list) == 0 {
-		m.appendChat("System", "~/.deepx/skills/ 下没有 deepx 管理的 skill 可删除。"+
+		m.appendChat("System", "当前实例的 skills/ 下没有 deepx 管理的 skill 可删除。"+
 			"\n注:/skill-delete 只动 deepx 自己装的,~/.claude/skills 等其他工具的 skill 不会被列出。")
 		return
 	}
@@ -215,7 +215,7 @@ func (m model) skillAddModalBlock() string {
 
 func (m model) skillDeleteModalBlock() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(highlightColor).Render("删除 Skill")
-	subtitle := lipgloss.NewStyle().Foreground(subtleColor).Render("仅列 ~/.deepx/skills/ 下的(deepx 自己装的)")
+	subtitle := lipgloss.NewStyle().Foreground(subtleColor).Render("仅列当前实例 skills/ 下的(deepx 自己装的)")
 	rows := make([]string, 0, len(m.skillDelNames))
 	for i, name := range m.skillDelNames {
 		marker := "  "

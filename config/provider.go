@@ -22,6 +22,8 @@ import (
 	"sort"
 	"strings"
 
+	"deepx/instance"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,13 +63,13 @@ func IsPresetProvider(name string) bool {
 // Providers 是 provider.yaml 的反序列化目标:供应商名 → 该供应商的 {flash, pro} 配置。
 type Providers map[string]Config
 
-// ProviderPath 返回 ~/.deepx/provider.yaml 绝对路径。
+// ProviderPath 返回 <配置根>/provider.yaml 绝对路径。
 func ProviderPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("无法获取用户目录: %w", err)
+	root := instance.Home()
+	if root == "" {
+		return "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, dirName, providerFileName), nil
+	return filepath.Join(root, providerFileName), nil
 }
 
 // LoadProviders 读 provider.yaml。文件不存在视为空(返回空 map,非错误);解析失败返回 err。

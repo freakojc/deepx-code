@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/sha256"
+	"deepx/instance"
 	"deepx/workflow"
 	"encoding/hex"
 	"encoding/json"
@@ -19,15 +20,15 @@ import (
 // salt 用于区分「同一父 workflow 里对同名+同 args 子 workflow 的多次嵌套调用」——否则它们会
 // 共用同一 journal 文件、第二次命中第一次的缓存。顶层传 ""。
 func openWorkflowJournal(script *workflow.Script, args any, salt string) (*workflowJournal, int, bool) {
-	home, _ := os.UserHomeDir()
+	root := instance.Home()
 	argsJSON, _ := json.Marshal(args)
-	return loadWorkflowJournal(home, script.Name, script.Source, argsJSON, salt)
+	return loadWorkflowJournal(root, script.Name, script.Source, argsJSON, salt)
 }
 
 // workflowJournal 是 resume 的磁盘存储:把每个成功 agent 的结果按执行序号(seq)落盘成 JSONL,
 // 中断/失败后重跑同一 workflow(同名 + 同 args + 同脚本)时,已完成的 seq 命中缓存不再真跑。
 //
-// 文件:~/.deepx/workflows/.journal/<name>.<argsHash>.jsonl
+// 文件:<配置根>/workflows/.journal/<name>.<argsHash>.jsonl
 //   - 第一行 header:{"script_hash":"…"}(脚本变了则旧 journal 作废,从头来)
 //   - 其后每行一条:{"seq":N,"result":"…"}(追加写,O(1)/条,中断安全)
 //
@@ -46,8 +47,8 @@ type wfJournalEntry struct {
 
 // loadWorkflowJournal 打开/新建一个 journal,返回它、「已缓存的步骤数」(>0 表示这是一次 resume)、
 // 以及是否成功落盘(persisted)。脚本变化(scriptHash 不匹配)→ 旧结果作废、文件重置。
-func loadWorkflowJournal(home, name, scriptSource string, argsJSON []byte, salt string) (*workflowJournal, int, bool) {
-	dir := filepath.Join(home, ".deepx", "workflows", ".journal")
+func loadWorkflowJournal(root, name, scriptSource string, argsJSON []byte, salt string) (*workflowJournal, int, bool) {
+	dir := filepath.Join(root, "workflows", ".journal")
 	argsSum := sha256.Sum256(argsJSON)
 	scriptHash := hashHex(scriptSource, 16)
 	fname := fmt.Sprintf("%s.%s", name, hex.EncodeToString(argsSum[:])[:8])

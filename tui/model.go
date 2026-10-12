@@ -4,6 +4,7 @@ import (
 	"context"
 	"deepx/agent"
 	"deepx/agent/router"
+	"deepx/instance"
 	"deepx/mcp"
 	"deepx/session"
 	"deepx/skill"
@@ -605,7 +606,7 @@ type shadowResultMsg struct {
 // 在更低档位处 history < keepTarget 会被 RunCompression 拒(白跑);30% 起 history 才够压。
 var shadowPoints = []int{30, 45, 60}
 
-func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub *web.Hub, srv *web.Server, webURL string) model {
+func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub *web.Hub, srv *web.Server, webURL, webNote string) model {
 	vp := viewport.New()
 	vp.MouseWheelDelta = mouseWheelDelta()
 
@@ -691,22 +692,24 @@ func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub
 	// Skill 加载器:多来源发现(兼容 Claude Code / opencode / cursor / agents 生态)。
 	// workspace 优先于 global,同名覆盖。任一目录不存在不报错。
 	// 用户没建任何 skill 时 catalog 为空,system prompt 不挂"Available Skills"段。
-	home, _ := os.UserHomeDir()
-	skill.CleanupExtractedBuiltins(home) // 一次性清掉旧版解压到 ~/.deepx/skills 的内置副本(现改为从 embed 加载)
+	usrHome, _ := os.UserHomeDir() // 兼容其它工具生态目录(它们约定在用户 home 下)
+	root := instance.Home()        // deepx 实例环境根(skills 随实例隔离)
+	skill.CleanupExtractedBuiltins(root) // 一次性清掉旧版解压到 <配置根>/skills 的内置副本(现改为从 embed 加载)
 	workspaceSkillDirs := []string{
 		filepath.Join(wd, ".deepx", "skills"),
 	}
 	globalSkillDirs := []string{
-		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".deepx", "skills"),
+		filepath.Join(usrHome, ".agents", "skills"),
+		filepath.Join(usrHome, ".claude", "skills"),
+		filepath.Join(root, "skills"),
 	}
 	loader := skill.New(workspaceSkillDirs, globalSkillDirs)
 	tools.SetSkillLoader(loader)
 	skillCatalog := buildSkillCatalog(loader)
 
 	// workflow:.deepx/workflows/*.js(项目级覆盖全局),/workflow 命令加载执行。
-	wfProjectDirs, wfGlobalDirs := workflow.DefaultDirs(wd, home)
+	// 全局层:.claude/workflows 兼容 Claude Code(用户 home),.deepx 的 workflows 随实例根。
+	wfProjectDirs, wfGlobalDirs := workflow.DefaultDirs(wd, usrHome)
 	workflowLoader := workflow.New(wfProjectDirs, wfGlobalDirs)
 
 	// 代码图谱:绑定到当前 workspace 根,懒构建(首次 CodeGraph 调用时才遍历解析)。
@@ -926,6 +929,13 @@ func initialModel(models agent.ModelConfig, needsSetup bool, version string, hub
 
 	// 每次启动的欢迎语。
 	m.appendChat("System", T("welcome"))
+
+	// web dashboard 启动失败(端口被其它实例/程序占用等)的说明,在对话流里显示。
+	// 不能像以前那样在进入 alt-screen 前裸写 stderr —— Windows 终端下残留的
+	// stderr 文本会盖在输入区上,造成"打字看不见"的假象(实际输入正常)。
+	if webNote != "" {
+		m.appendChat("System", webNote)
+	}
 
 	// 清理掉的孤儿会话如实报一行(只在真删了东西时吭声)。把删掉的 workspace 路径列出来 ——
 	// 删的是不可逆的历史,用户至少要能看见删的是哪些。
@@ -3358,7 +3368,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.appendChat("System", "✗ 安装失败:"+msg.err.Error())
 		} else {
-			m.appendChat("System", fmt.Sprintf("✓ 已安装 skill「%s」到 ~/.deepx/skills/%s/", msg.skillName, msg.skillName))
+			if dir, err := skill.InstalledDir(); err == nil {
+				m.appendChat("System", fmt.Sprintf("✓ 已安装 skill「%s」到 %s/%s/", msg.skillName, dir, msg.skillName))
+			} else {
+				m.appendChat("System", fmt.Sprintf("✓ 已安装 skill「%s」", msg.skillName))
+			}
 		}
 		return m, nil
 
@@ -3584,14 +3598,13 @@ func (m model) buildUserMessage(text string) agent.ChatMessage {
 	}
 }
 
-// saveAttachedImage 把刚粘贴的 PNG 字节写到 ~/.deepx/ocr/cache/ 下的新文件,
+// saveAttachedImage 把刚粘贴的 PNG 字节写到 <实例环境根>/ocr/cache/ 下的新文件,
 // 返回该文件的绝对路径。失败时返回空串 + 错误,调用方决定怎么提示用户。
 func saveAttachedImage(data []byte, index int) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = os.TempDir()
+	cacheDir := tools.PasteCacheDir() // 单一来源:与 web 上传、SweepPasteCache 同一目录(实例隔离)
+	if cacheDir == "" {
+		cacheDir = filepath.Join(os.TempDir(), "deepx", "ocr", "cache")
 	}
-	cacheDir := filepath.Join(home, ".deepx", "ocr", "cache")
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}
@@ -3836,6 +3849,8 @@ func (m *model) handleSlashCommand(input string) tea.Cmd {
 		m.handleRouterListCommand("flash")
 	case "/status":
 		m.toggleStatusPanel()
+	case "/instance":
+		m.appendChat("assistant", instanceMessage())
 	case "/thinking":
 		m.toggleThinking()
 	case "/new":

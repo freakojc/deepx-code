@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"deepx/instance"
 	"deepx/ocr"
 )
 
@@ -107,13 +108,13 @@ func setStatus(s Status, err error) {
 	lastErr.Store(&m)
 }
 
-// AssetDir 返回语义路由资产目录 ~/.deepx/router。
+// AssetDir 返回语义路由资产目录 <配置根>/router(跨实例共享的 embedder 资产,可重建)。
 func AssetDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	dir := instance.SharedDir("router")
+	if dir == "" {
+		return "", errNoHome
 	}
-	return filepath.Join(home, ".deepx", "router"), nil
+	return dir, nil
 }
 
 // assetsReady 判断模型和分词器都已完整落盘(按字节数校验)。

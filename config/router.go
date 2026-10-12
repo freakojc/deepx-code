@@ -40,6 +40,8 @@ import (
 	"slices"
 	"strings"
 
+	"deepx/instance"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,13 +80,13 @@ type routerFile struct {
 	FlashPatterns    []string `yaml:"flash_patterns"`
 }
 
-// RouterPath 返回 ~/.deepx/router.yaml 绝对路径。
+// RouterPath 返回 <配置根>/router.yaml 绝对路径。
 func RouterPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("无法获取用户目录: %w", err)
+	root := instance.Home()
+	if root == "" {
+		return "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, dirName, routerFileName), nil
+	return filepath.Join(root, routerFileName), nil
 }
 
 // hashPatterns 算一组样板句的指纹。含条数与顺序 —— 换序也算改过,

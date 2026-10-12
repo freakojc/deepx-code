@@ -7,9 +7,12 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"deepx/instance"
 )
 
 // sessionDirRe 匹配本程序自己建的 session 目录名(sha1 取前 16 hex,见 rawSessionID)。
@@ -22,13 +25,13 @@ type OrphanRemoval struct {
 	Workspace string // meta.json 里记的、已经不存在的那个路径
 }
 
-// SessionsRoot 返回 ~/.deepx/sessions 绝对路径。
+// SessionsRoot 返回 <配置根>/sessions 绝对路径。
 func SessionsRoot() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	root := instance.Home()
+	if root == "" {
+		return "", fmt.Errorf("无法定位配置目录")
 	}
-	return filepath.Join(home, ".deepx", "sessions"), nil
+	return filepath.Join(root, "sessions"), nil
 }
 
 // CleanupOrphaned 扫描 ~/.deepx/sessions/,删掉 workspace 已不存在的会话目录,返回删了哪些。

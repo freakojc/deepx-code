@@ -102,7 +102,7 @@ func BuiltinSkills() []Skill {
 	return out
 }
 
-// CleanupExtractedBuiltins 一次性迁移:删掉旧版「抽取模型」解压到 ~/.deepx/skills 的内置 skill 副本,
+// CleanupExtractedBuiltins 一次性迁移:删掉旧版「抽取模型」解压到 <配置根>/skills 的内置 skill 副本,
 // 让内置不再污染全局用户 skill。
 //
 //   - 识别信号:旧版留下的 .builtin_manifest / .builtin_version 标记文件。两者都没有 → 直接返回
@@ -110,9 +110,10 @@ func BuiltinSkills() []Skill {
 //   - 删除目标:**显式常量清单 builtinSkillNames**(只删名字落在这个内置集合里的目录;
 //     用户自定义 skill 不同名,绝不触碰)。
 //   - 删完移除两个标记文件 → 本函数对同一目录只实际生效一次,之后是无副作用的 no-op。
-//     这也保证清理后用户仍能在 ~/.deepx/skills/ 放同名 skill 覆盖内置(不会再被删)。
-func CleanupExtractedBuiltins(home string) {
-	dest := filepath.Join(home, ".deepx", "skills")
+//     这也保证清理后用户仍能在 <配置根>/skills/ 放同名 skill 覆盖内置(不会再被删)。
+// root 是配置根(instance.Home),不再拼 ".deepx" 层 —— 由调用方传实例环境根。
+func CleanupExtractedBuiltins(root string) {
+	dest := filepath.Join(root, "skills")
 	manifestPath := filepath.Join(dest, manifestFile)
 	versionPath := filepath.Join(dest, versionFile)
 

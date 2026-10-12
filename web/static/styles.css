@@ -225,6 +225,15 @@ body {
 .composer button:active:not(:disabled) { transform: translateY(1px); }
 .composer button:disabled { opacity: .35; cursor: not-allowed; }
 .composer button.stop-btn { background: var(--red); color: #ffffff; }
+/* 工具按钮(添加文件/停止/发送)统一固定高度:attach-btn 带 1px 边框、send 为粗体,
+   两者隐式高度差 ~2px,align-items:flex-end 下顶部不齐。直接子元素选择器不误伤
+   composer-main 内的小 × 按钮。 */
+.composer > button {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* 整页拖图遮罩:拖拽文件悬停时全屏暗化 + 居中提示"松开添加" */
 .drop-overlay {

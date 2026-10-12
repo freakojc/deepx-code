@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 
+	"deepx/instance"
+
 	ort "github.com/getcharzp/onnxruntime_purego"
 )
 
@@ -36,13 +38,13 @@ var (
 	globalOnce sync.Once
 )
 
-// DefaultCacheDir 默认资产缓存目录: ~/.deepx/ocr/
+// DefaultCacheDir 默认资产缓存目录:<配置根>/ocr(跨实例共享,只放 ORT 库/模型等可重建资产;
+// 粘贴图片缓存另见 tools.PasteCacheDir——那是实例隔离的 ocr/cache,两者只差一层)。
 func DefaultCacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(os.TempDir(), "deepx", "ocr")
+	if d := instance.SharedDir("ocr"); d != "" {
+		return d
 	}
-	return filepath.Join(home, ".deepx", "ocr")
+	return filepath.Join(os.TempDir(), "deepx", "ocr")
 }
 
 // Global 返回进程全局 OCR 实例 (惰性初始化,资产未就绪时返回未 Load 的实例)。
